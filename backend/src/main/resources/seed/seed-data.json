@@ -1,0 +1,959 @@
+{
+  "groups": [
+    {
+      "name": "原初世界",
+      "bosses": [
+        {
+          "name": "H赛伦",
+          "tier": "H",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友F",
+                  "job": "冰雷",
+                  "power": 100
+                },
+                {
+                  "player": "群友E",
+                  "job": "剑豪",
+                  "power": 70
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "琳恩",
+                  "power": 60
+                },
+                {
+                  "player": "群友E",
+                  "job": "剑豪",
+                  "power": 70
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友E",
+                  "job": "光枪",
+                  "power": 70
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "E狗",
+          "tier": "E",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友E",
+                  "job": "剑豪",
+                  "power": 70
+                },
+                {
+                  "player": "群友F",
+                  "job": "剑豪",
+                  "power": 120
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "N狗",
+          "tier": "N",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "剑豪",
+                  "power": 120
+                },
+                {
+                  "player": "群友D",
+                  "job": "Kanna",
+                  "power": 160
+                },
+                {
+                  "player": "群友C",
+                  "job": "剑豪",
+                  "power": 85
+                },
+                {
+                  "player": "群友K",
+                  "job": "兔子",
+                  "power": 120
+                },
+                {
+                  "player": "群友A",
+                  "job": "琳恩",
+                  "power": 60
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "C狗",
+          "tier": "C",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "Kanna",
+                  "power": 330
+                },
+                {
+                  "player": "群友H",
+                  "job": "火毒",
+                  "power": 350
+                },
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友R",
+                  "job": "剑豪",
+                  "power": 170
+                },
+                {
+                  "player": "群友G",
+                  "job": "兔子",
+                  "power": 230
+                },
+                {
+                  "player": "群友C",
+                  "job": "Kanna",
+                  "power": 200
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友B",
+                  "job": "Kanna",
+                  "power": 240
+                },
+                {
+                  "player": "群友I",
+                  "job": "Sia",
+                  "power": 230
+                },
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 240
+                },
+                {
+                  "player": "群友P",
+                  "job": "剑豪",
+                  "power": 200
+                },
+                {
+                  "player": "群友S",
+                  "job": "黑骑",
+                  "power": 200
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "N猴",
+          "tier": "N",
+          "capacity": 3,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 220
+                },
+                {
+                  "player": "群友C",
+                  "job": "Kanna",
+                  "power": 220
+                },
+                {
+                  "player": "群友F",
+                  "job": "Sia",
+                  "power": 100
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "Kanna",
+                  "power": 330
+                },
+                {
+                  "player": "群友C",
+                  "job": "剑豪",
+                  "power": 85
+                },
+                {
+                  "player": "群友K",
+                  "job": "兔子",
+                  "power": 120
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友R",
+                  "job": "剑豪",
+                  "power": 170
+                },
+                {
+                  "player": "群友G",
+                  "job": "兔子",
+                  "power": 230
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友F",
+                  "job": "剑豪",
+                  "power": 120
+                },
+                {
+                  "player": "群友D",
+                  "job": "Kanna",
+                  "power": 160
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "E卡",
+          "tier": "E",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "剑豪",
+                  "power": 120
+                },
+                {
+                  "player": "群友D",
+                  "job": "Kanna",
+                  "power": 160
+                },
+                {
+                  "player": "群友C",
+                  "job": "剑豪",
+                  "power": 85
+                },
+                {
+                  "player": "群友A",
+                  "job": "琳恩",
+                  "power": 60
+                },
+                {
+                  "player": "群友K",
+                  "job": "兔子",
+                  "power": 120
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "N卡",
+          "tier": "N",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "Kanna",
+                  "power": 330
+                },
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友H",
+                  "job": "火毒",
+                  "power": 350
+                },
+                {
+                  "player": "群友R",
+                  "job": "剑豪",
+                  "power": 170
+                },
+                {
+                  "player": "群友C",
+                  "job": "Kanna",
+                  "power": 220
+                },
+                {
+                  "player": "群友G",
+                  "job": "兔子",
+                  "power": 230
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友B",
+                  "job": "Kanna",
+                  "power": 240
+                },
+                {
+                  "player": "群友I",
+                  "job": "Sia",
+                  "power": 230
+                },
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 240
+                },
+                {
+                  "player": "群友P",
+                  "job": "剑豪",
+                  "power": 200
+                },
+                {
+                  "player": "群友S",
+                  "job": "黑骑",
+                  "power": 200
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "N凶星",
+          "tier": "N",
+          "capacity": 3,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友P",
+                  "job": "剑豪",
+                  "power": 200
+                },
+                {
+                  "player": "群友S",
+                  "job": "黑骑",
+                  "power": 200
+                },
+                {
+                  "player": "群友G",
+                  "job": "兔子",
+                  "power": 230
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友C",
+                  "job": "Kanna",
+                  "power": 220
+                },
+                {
+                  "player": "群友R",
+                  "job": "剑豪",
+                  "power": 170
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友H",
+                  "job": "火毒",
+                  "power": 350
+                },
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 240
+                },
+                {
+                  "player": "群友F",
+                  "job": "Kanna",
+                  "power": 330
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友B",
+                  "job": "Kanna",
+                  "power": 240
+                },
+                {
+                  "player": "群友I",
+                  "job": "Sia",
+                  "power": 210
+                },
+                {
+                  "player": "群友D",
+                  "job": "Kanna",
+                  "power": 160
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "N林波",
+          "tier": "N",
+          "capacity": 3,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友P",
+                  "job": "剑豪",
+                  "power": 200
+                },
+                {
+                  "player": "群友S",
+                  "job": "黑骑",
+                  "power": 200
+                },
+                {
+                  "player": "群友H",
+                  "job": "火毒",
+                  "power": 350
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友M",
+                  "job": "剑豪",
+                  "power": 315
+                },
+                {
+                  "player": "群友C",
+                  "job": "Kanna",
+                  "power": 230
+                },
+                {
+                  "player": "群友F",
+                  "job": "Kanna",
+                  "power": 330
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 240
+                },
+                {
+                  "player": "群友B",
+                  "job": "Kanna",
+                  "power": 240
+                },
+                {
+                  "player": "群友I",
+                  "job": "Sia",
+                  "power": 210
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "神秘河",
+      "bosses": [
+        {
+          "name": "EX斯乌",
+          "tier": "EX",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友D",
+                  "job": "光枪",
+                  "power": 200
+                },
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友G",
+                  "job": "兔子",
+                  "power": 240
+                },
+                {
+                  "player": "群友R",
+                  "job": "剑豪",
+                  "power": 200
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "H斯乌",
+          "tier": "H",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "光枪",
+                  "power": 20
+                },
+                {
+                  "player": "群友B",
+                  "job": "Sia",
+                  "power": 35
+                },
+                {
+                  "player": "群友N",
+                  "job": "Kanna",
+                  "power": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "H大米",
+          "tier": "H",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "光枪",
+                  "power": 20
+                },
+                {
+                  "player": "群友B",
+                  "job": "Sia",
+                  "power": 35
+                },
+                {
+                  "player": "群友N",
+                  "job": "Kanna",
+                  "power": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "C绿水灵",
+          "tier": "C",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友F",
+                  "job": "豹弩",
+                  "power": 40
+                },
+                {
+                  "player": "群友A",
+                  "job": "琳恩",
+                  "power": 60
+                },
+                {
+                  "player": "群友B",
+                  "job": "Sia",
+                  "power": 35
+                },
+                {
+                  "player": "群友D",
+                  "job": "剑豪",
+                  "power": 35
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "光枪",
+                  "power": 20
+                },
+                {
+                  "player": "群友E",
+                  "job": "琳恩",
+                  "power": 100
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "Kanna",
+                  "power": 185
+                },
+                {
+                  "player": "群友E",
+                  "job": "光枪",
+                  "power": 30
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "老黑能量车",
+          "tier": "",
+          "capacity": 6,
+          "runs": [
+            {
+              "members": [
+                {
+                  "player": "群友A",
+                  "job": "琳恩",
+                  "power": 60
+                }
+              ]
+            },
+            {
+              "members": [
+                {
+                  "player": "群友E",
+                  "job": "剑豪",
+                  "power": 70
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "players": [
+    {
+      "nickname": "群友F",
+      "characters": [
+        {
+          "job": "Kanna",
+          "power": 330,
+          "mainChar": true
+        },
+        {
+          "job": "剑豪",
+          "power": 120,
+          "mainChar": false
+        },
+        {
+          "job": "冰雷",
+          "power": 100,
+          "mainChar": false
+        },
+        {
+          "job": "Sia",
+          "power": 100,
+          "mainChar": false
+        },
+        {
+          "job": "豹弩",
+          "power": 40,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友B",
+      "characters": [
+        {
+          "job": "Kanna",
+          "power": 240,
+          "mainChar": true
+        },
+        {
+          "job": "兔子",
+          "power": 110,
+          "mainChar": false
+        },
+        {
+          "job": "Sia",
+          "power": 35,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友A",
+      "characters": [
+        {
+          "job": "Kanna",
+          "power": 185,
+          "mainChar": true
+        },
+        {
+          "job": "琳恩",
+          "power": 60,
+          "mainChar": false
+        },
+        {
+          "job": "光枪",
+          "power": 20,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友C",
+      "characters": [
+        {
+          "job": "Kanna",
+          "power": 250,
+          "mainChar": true
+        },
+        {
+          "job": "剑豪",
+          "power": 100,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友R",
+      "characters": [
+        {
+          "job": "剑豪",
+          "power": 200,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友D",
+      "characters": [
+        {
+          "job": "光枪",
+          "power": 240,
+          "mainChar": true
+        },
+        {
+          "job": "Kanna",
+          "power": 160,
+          "mainChar": false
+        },
+        {
+          "job": "阴阳师",
+          "power": 160,
+          "mainChar": false
+        },
+        {
+          "job": "豹弩",
+          "power": 80,
+          "mainChar": false
+        },
+        {
+          "job": "剑豪",
+          "power": 35,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "Fycie",
+      "characters": [
+        {
+          "job": "光枪",
+          "power": 200,
+          "mainChar": true
+        },
+        {
+          "job": "超能",
+          "power": 13,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友P",
+      "characters": [
+        {
+          "job": "剑豪",
+          "power": 200,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友M",
+      "characters": [
+        {
+          "job": "剑豪",
+          "power": 315,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友L",
+      "characters": [
+        {
+          "job": "兔子",
+          "power": 120,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友E",
+      "characters": [
+        {
+          "job": "琳恩",
+          "power": 92,
+          "mainChar": true
+        },
+        {
+          "job": "剑豪",
+          "power": 70,
+          "mainChar": false
+        },
+        {
+          "job": "光枪",
+          "power": 70,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友G",
+      "characters": [
+        {
+          "job": "兔子",
+          "power": 230,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友Q",
+      "characters": [
+        {
+          "job": "黑骑",
+          "power": 200,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友H",
+      "characters": [
+        {
+          "job": "火毒",
+          "power": 350,
+          "mainChar": true
+        },
+        {
+          "job": "兔子",
+          "power": 70,
+          "mainChar": false
+        }
+      ]
+    },
+    {
+      "nickname": "群友I",
+      "characters": [
+        {
+          "job": "Sia",
+          "power": 230,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友S",
+      "characters": [
+        {
+          "job": "黑骑",
+          "power": 200,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友K",
+      "characters": [
+        {
+          "job": "兔子",
+          "power": 120,
+          "mainChar": true
+        }
+      ]
+    },
+    {
+      "nickname": "群友N",
+      "characters": [
+        {
+          "job": "Kanna",
+          "power": 14,
+          "mainChar": true
+        }
+      ]
+    }
+  ]
+}

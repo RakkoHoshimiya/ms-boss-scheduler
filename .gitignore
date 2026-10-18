@@ -1,0 +1,36 @@
+# 敏感信息
+deploy/gmsr.env
+*.env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.keystore
+.deploy/
+id_rsa*
+id_ed25519*
+known_hosts
+askpass.sh
+
+# 依赖与构建产物
+.tools/
+node_modules/
+dist/
+target/
+*.jar
+*.war
+*.log
+*.tsbuildinfo
+
+# 编辑器与系统文件
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.tmp
+.cache/

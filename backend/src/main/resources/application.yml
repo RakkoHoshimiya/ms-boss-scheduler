@@ -1,0 +1,108 @@
+server:
+  port: 18080
+  address: 127.0.0.1
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/css,application/javascript
+  shutdown: graceful
+
+spring:
+  application:
+    name: gmsr-scheduler
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # 专用 schema，避免与同库中的其它业务表混淆
+    url: ${GMSR_DB_URL:jdbc:postgresql://127.0.0.1:54233/gmsr?currentSchema=gmsr}
+    username: ${GMSR_DB_USER:gmsr_app}
+    password: ${GMSR_DB_PASSWORD:CHANGE_ME_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: gmsr-pool
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 表结构由 Hibernate 按实体生成；数据初始化由 SeedDataImporter 负责
+      ddl-auto: update
+    properties:
+      hibernate:
+        default_schema: gmsr
+        jdbc:
+          time_zone: Asia/Shanghai
+          batch_size: 30
+        order_inserts: true
+        order_updates: true
+        format_sql: false
+  data:
+    redis:
+      # SA-Token 会话存储（与业务库无关，失败只影响登录态，不影响数据）
+      host: ${GMSR_REDIS_HOST:127.0.0.1}
+      port: ${GMSR_REDIS_PORT:6379}
+      password: ${GMSR_REDIS_PASSWORD:}
+      database: ${GMSR_REDIS_DB:1}
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+
+  flyway:
+    enabled: false
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+sa-token:
+  # 会话数据统一存 Redis（1Panel 提供的 Redis，用 db 1 与面板自身数据隔离）
+  # access token 短命（2 小时），配合 /api/auth/refresh 做无感刷新；
+  # refresh token 7 天，期间只要用过一次就续期，7 天完全没动作才要求重新登录。
+  token-name: gmsr-token
+  timeout: 7200
+  active-timeout: 604800
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+  # 同源策略保持默认（未配置 CORS 时不校验）
+
+gmsr:
+  jwt:
+    # 生产环境通过环境变量注入
+    secret: ${GMSR_JWT_SECRET:CHANGE_ME_JWT_SECRET}
+    expire-hours: 168
+  player:
+    # 群友账号初始密码（也是管理员重置后的密码），首次登录会要求修改
+    default-password: ${GMSR_PLAYER_PASSWORD:CHANGE_ME_PLAYER_PASSWORD}
+  admin:
+    username: ${GMSR_ADMIN_USER:admin}
+    password: ${GMSR_ADMIN_PASSWORD:CHANGE_ME_ADMIN_PASSWORD}
+  # BOSS 语音频道（LiveKit）
+  voice:
+    enabled: ${GMSR_VOICE_ENABLED:false}
+    api-key: ${GMSR_VOICE_API_KEY:}
+    api-secret: ${GMSR_VOICE_API_SECRET:}
+    ws-url: ${GMSR_VOICE_WS_URL:}
+    token-hours: 6
+  security:
+    login:
+      # 连续失败次数达到该值后锁定，防止暴力破解
+      max-attempts: ${GMSR_LOGIN_MAX_ATTEMPTS:8}
+      # 单来源 IP 的阈值放宽，避免同一网络下互相影响
+      max-attempts-per-ip: ${GMSR_LOGIN_MAX_ATTEMPTS_PER_IP:30}
+      lock-minutes: ${GMSR_LOGIN_LOCK_MINUTES:15}
+  cors:
+    allowed-origins: ${GMSR_CORS:http://127.0.0.1:5173,http://localhost:5173}
+
+logging:
+  level:
+    root: INFO
+    com.gmsr: INFO
+    org.hibernate.SQL: WARN
