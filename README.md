@@ -7,28 +7,141 @@
 **Spring Boot 3 + JDK 25 + PostgreSQL 18** 后端，**React + TypeScript + Vite** 前端，
 托管在 1Panel 的 OpenResty 上。
 
-## 线上地址
+## 部署
 
-| 协议 | 地址 | 说明 |
-| --- | --- | --- |
-| HTTP | http://<YOUR_SERVER_IP>:8080/ | 主入口（OpenResty 8080） |
-| HTTPS | https://<YOUR_SERVER_IP>:4433/ | **必须用这个**（8080 会自动跳过来）；证书是私有 CA 签发的，需先按 /ca-install.html 安装信任 |
+### 一、端口放行（**最容易漏，先看这个**）
 
-### 账号
+服务器安全组 / 防火墙必须按下面三张表配置。漏配的表现：
+语音连不上、或页面能打开但一直转圈。
 
-| 账号类型 | 用户名 | 初始密码 | 能做什么 |
+#### 必须对公网放行
+
+| 端口 | 协议 | 用途 | 漏配的后果 |
 | --- | --- | --- | --- |
-| 管理员 | `admin` | `CHANGE_ME_ADMIN_PASSWORD` | 全部功能：编排车次、管理 BOSS/群友、重置群友密码 |
-| 群友（14 个，自动创建） | **QQ 号**，例如 `100000013` | `CHANGE_ME_PLAYER_PASSWORD` | 查看全部排班；标记自己所在车次的「未完成 / 已完成」；改自己的密码 |
-| 访客（未登录） | — | — | 只读查看全部排班 |
+| `8080` | TCP | OpenResty HTTP 入口（会 301 跳 HTTPS） | 用 http 访问打不开 |
+| `4433` | TCP | OpenResty HTTPS 主入口 | **整站打不开** |
+| `4433` | UDP | HTTP/3（QUIC） | 一般无感（浏览器会退回 TCP） |
+| **`50000-50200`** | **UDP** | **LiveKit 语音媒体流** | **语音能进房但听不到声音** |
+| `7881` | TCP | LiveKit WebRTC over TCP（UDP 不通时兜底） | 部分网络下语音连不上 |
+| `3478` | UDP | LiveKit TURN | 对称 NAT 环境下语音连不上 |
+| `5349` | TCP | LiveKit TURN over TLS | 同上 |
 
-群友账号一律用 **QQ 号**登录，初始密码由管理员掌握并逐个告知本人；**本人首次登录会被强制要求设置自己的密码**。
-忘记密码找管理员，在「系统设置」点「重置密码」——重置后密码恢复为系统初始密码，本人下次登录必须重新设置。
+> 语音相关的 5 条（50000-50200/UDP、7881/TCP、3478/UDP、5349/TCP）是 **LiveKit 的硬性要求**，
+> 少一条都可能出现「能连上但没声音」。不用语音功能可以把 `GMSR_VOICE_ENABLED` 设为 `false`，这几条就不用开。
 
-> 安全约定：**前端页面不显示任何账号规则或默认密码**，这些信息只在本文档（内部资料）与管理员手里。
+#### 只给运维用（建议加 IP 白名单）
 
-群友账号已按 QQ 对照表重建并绑定到对应群友档案（一个群友一个账号）。
-管理员也可以在「系统设置」里关闭某个账号的 boss排班 权限（变回只读）。
+| 端口 | 协议 | 用途 |
+| --- | --- | --- |
+| `2222` | TCP | SSH（改端口是为了避开扫描，默认 22） |
+
+#### **绝对不要对公网开放**
+
+| 端口 | 组件 | 原因 |
+| --- | --- | --- |
+| `18080` | Spring Boot 后端 | 只监听了 127.0.0.1，由 OpenResty 反代；直接暴露等于绕过 HTTPS |
+| `54233` | PostgreSQL | 数据库凭据一旦泄露就是全量数据 |
+| `26739` | Redis | 存着登录会话，暴露可被劫持 |
+| `7880` | LiveKit 信令 | 已由 nginx 的 `/lk/` 反代，不需要单独开放 |
+| `33066` / `24487` | 1Panel 的 MySQL / 面板 | 与本项目无关，更不该对外开放 |
+
+> ⚠️ 注意：1Panel 装的 PostgreSQL / Redis 默认是 `0.0.0.0` 监听（docker 端口映射），
+> **端口本身没有「只允许内网」的能力**，必须靠云厂商安全组 + 主机防火墙挡住。
+> 部署完建议用 `ss -tlnp` 自查一遍，确认 54233 / 26739 没有暴露在公网。
+
+---
+
+### 二、环境要求
+
+| 组件 | 版本 | 说明 |
+| --- | --- | --- |
+| JDK | **25** | 代码用了虚拟线程，必须 21+，推荐 25 |
+| Maven | 3.9+ | 仅编译时需要 |
+| PostgreSQL | 14+ | 需要专用 schema（本项目用 `gmsr`） |
+| Redis | 6+ | 存登录会话，用独立 db（本项目用 `db 1`） |
+| OpenResty / Nginx | 任意 | 负责 TLS 与静态文件、反向代理 |
+| LiveKit | 1.13+ | 可选；语音功能需要 |
+| Node.js | 20+ | 仅构建前端时需要 |
+
+### 三、部署步骤（概要）
+
+1. **准备数据库**：建库 + schema，创建专用账号（不要用超级用户）
+2. **写配置**：把 `deploy/gmsr.env.example` 复制成运行配置，至少填
+   `GMSR_DB_PASSWORD` / `GMSR_JWT_SECRET` / `GMSR_ADMIN_PASSWORD`
+   —— 详细项见 [SECURITY.md](SECURITY.md)
+3. **跑后端**：`java -jar gmsr-scheduler.jar`（默认只监听 127.0.0.1:18080）
+4. **构建前端**：`cd frontend && npm ci && npm run build`，把 `dist/` 交给 Nginx 托管
+5. **配 Nginx**：参考 `deploy/gmsr.conf`，把 `/api/` 反代到 127.0.0.1:18080、
+   `/lk/` 反代到 LiveKit 的 7880
+6. **开端口**：按上面的表放行
+7. **验收**：`curl https://<你的域名或IP>:4433/api/health` 返回 ok
+
+> 完整的环境变量清单、上线前检查清单在 [SECURITY.md](SECURITY.md)。
+
+### 四、部署后的目录与路径（1Panel 环境示例）
+
+| 组件 | 位置 |
+| --- | --- |
+| 后端 jar | `/opt/gmsr/app/gmsr-scheduler.jar` |
+| 后端环境变量 | `/opt/gmsr/gmsr.env`（权限 600） |
+| 后端日志 | journald：`journalctl -u gmsr-backend` |
+| systemd 服务 | `gmsr-backend.service`（enable 后开机自启、崩溃自动重启） |
+| 后端监听 | `127.0.0.1:18080`（只对本机开放） |
+| 前端静态文件 | `/opt/1panel/www/gmsr` |
+| OpenResty 站点配置 | `/opt/1panel/www/conf.d/gmsr.conf` |
+| Maven 构建目录 | `/root/gmsr-build/backend` |
+| PostgreSQL | Docker 容器，库 `gmsr`，专用账号 |
+| LiveKit 配置 | `/opt/livekit/livekit.yaml` |
+
+> 如果 OpenResty 的默认站点开了 `ssl_reject_handshake on`，
+> 用 IP 直接访问 4433 会被拒绝握手，需要把那行注释掉。
+
+## 常用运维命令
+
+```bash
+# 服务状态 / 重启 / 看日志
+systemctl status gmsr-backend
+systemctl restart gmsr-backend
+journalctl -u gmsr-backend -f
+
+# 改数据库连接或密钥后重启
+vi /opt/gmsr/gmsr.env && systemctl restart gmsr-backend
+
+# OpenResty 配置检查与重载
+docker exec 1Panel-openresty-xjMh nginx -t
+docker exec 1Panel-openresty-xjMh nginx -s reload
+
+# 连数据库
+docker exec -it <postgres容器名> psql -U <数据库账号> -d gmsr
+```
+
+### 重新部署
+
+本地改动代码后（需要能免密 SSH 到服务器）：
+
+```bash
+cd gmsr/deploy
+./deploy.sh backend     # 只更新后端：同步源码 → 服务器 Maven 打包 → 替换 jar → 重启
+./deploy.sh frontend    # 只更新前端：本地 npm build → 上传 dist → reload OpenResty
+./deploy.sh all         # 两个都更
+```
+
+### 本地开发
+
+```bash
+# 后端（需要 JDK 25 + Maven；数据库连接改成你自己的）
+cd gmsr/backend
+GMSR_DB_URL='jdbc:postgresql://<YOUR_SERVER_IP>:54233/gmsr?currentSchema=gmsr' \
+GMSR_DB_USER=gmsr_app GMSR_DB_PASSWORD=CHANGE_ME_DB_PASSWORD \
+mvn spring-boot:run
+
+# 前端（vite 已把 /api 代理到 127.0.0.1:18080）
+cd gmsr/frontend
+npm install && npm run dev     # http://127.0.0.1:5173
+
+# 构建产物冒烟测试（jsdom 加载真实 bundle，校验渲染 + 接口 + 无报错）
+npm run build && node smoke-test.mjs http://127.0.0.1:8080
+```
 
 ## 功能
 
@@ -49,7 +162,7 @@
   - **没有上人 / 整队 / 设置 / 复制 / 删除按钮** —— 这些编排功能全部集中在 **boss排班** 里，避免重复入口和误操作。
   - 顶部有**两级筛选（分组 → 具体 BOSS）**和关键词搜索；有排班权限的账号还能点「🐉 boss排班」直达。
 - **我的车次（登录后的首页）**：只列出自己要打的每一趟车——BOSS 名、难度、第几趟、时间安排，并标注「我用哪个角色（多少 M）」上这趟车，可直接点「✓ 我打完了」；也能在这里认领/切换绑定的群友昵称，避免把状态标到别人的车上。
-- **难度（Difficulty）机制**：每个 BOSS 都存了一份**它实际存在的难度清单**，排班页的难度选项以它为准（不再「本周排过什么就显示什么」，避免出现游戏里根本没有的难度）。
+- **难度（Difficulty）机制**：每个 BOSS 都存了一份**它实际存在的难度清单**，排班页的难度选项以它为准（不再「排过什么就显示什么」，避免出现游戏里根本没有的难度）。
   - 显示顺序固定为 **Easy → Normal → Hard → Chaos → Extreme**；每个难度标签上会显示这个难度有几趟车。
   - 难度代码对照（**别再混用**）：**`E` = Easy**、`N` = Normal、`H` = Hard、`C` = Chaos、**`EX` = Extreme**。
   - 新增 / 修改车次时，如果难度不在该 BOSS 的清单里，后端直接拒绝并提示可选难度。
@@ -189,31 +302,6 @@ BOSS 名称一览（国服官方中文名 + 官方立绘图标）：
 | 神秘河 | 觉醒希拉 | Hard | 6 | 0 |
 | 神秘河 | 敦凯尔 | Hard | 6 | 0 |
 
-## 版本控制（重要）
-
-工作区根目录有 git 仓库，**每次改动前先提交一次**，出问题可以立刻回滚。
-
-```sh
-cd ..                            # 回到工作区根目录
-./git-helper.sh status           # 看改了哪些文件
-./git-helper.sh save "改了什么"    # 提交（自动拦截密钥等敏感文件）
-./git-helper.sh log              # 看历史
-./git-helper.sh undo             # 丢弃未提交的改动 ← 改坏了先执行这个
-./git-helper.sh rollback <提交号>  # 回退某次提交（保留历史，可再改回来）
-```
-
-**为什么要有这个**：项目早期没有版本控制，「语音音量调节」连续改坏 5 轮却无法回滚，
-只能靠手工比对还原代码，风险很高。现在有基线了：
-
-| 提交 | 说明 |
-| --- | --- |
-| `c3e2fde` | 版本控制基线（含融合车、按月周期、语音标识、手机适配）|
-
-**不会入库的内容**（见根目录 `.gitignore`）：
-- `.deploy/` 下的 SSH 私钥与明文密码（只放行 `ssh.sh` / `scp.sh` 两个脚本）
-- `application.yml`（含数据库 / Redis 密码）—— 线上用 `/opt/gmsr/gmsr.env` 覆盖
-- `node_modules` / `dist` / `target` / `.tools`（依赖与构建产物）
-
 ## 目录结构
 
 ```
@@ -240,71 +328,6 @@ gmsr/
     ├── gmsr-backend.service systemd 单元
     ├── gmsr.conf            OpenResty 站点
     └── gmsr.env.example     后端环境变量模板
-```
-
-## 服务器部署现状（<YOUR_SERVER_IP>）
-
-| 组件 | 位置 |
-| --- | --- |
-| 后端 jar | `/opt/gmsr/app/gmsr-scheduler.jar` |
-| 后端环境变量 | `/opt/gmsr/gmsr.env`（600，属主 gmsr） |
-| 后端日志 | journald（），历史文件在  |
-| systemd 服务 | `gmsr-backend.service`（已 enable，开机自启，崩溃自动重启） |
-| 后端监听 | `127.0.0.1:18080`（只对本机开放，由 OpenResty 反代） |
-| 前端静态文件 | `/opt/1panel/www/gmsr`（容器内 `/www/gmsr`） |
-| OpenResty 站点配置 | `/opt/1panel/www/conf.d/gmsr.conf` |
-| 构建目录 | `/root/gmsr-build/backend`（Maven 编译用） |
-| PostgreSQL | Docker 容器 `1Panel-postgresql-2MLg`，库 `gmsr`，账号 `gmsr_app` |
-| JDK / Maven | `/usr/lib/jvm/java-25-openjdk-amd64`、`/root/apache-maven-3.9.16` |
-
-> 部署时把 1Panel 默认站点里的 `ssl_reject_handshake on` 注释掉了
-> （备份在 `00.default.conf.bak-gmsr`），否则用 IP 直接访问 4433 的 HTTPS 会被拒绝握手。
-
-## 常用运维命令
-
-```bash
-# 服务状态 / 重启 / 看日志
-systemctl status gmsr-backend
-systemctl restart gmsr-backend
-journalctl -u gmsr-backend -f
-
-# 改数据库连接或密钥后重启
-vi /opt/gmsr/gmsr.env && systemctl restart gmsr-backend
-
-# OpenResty 配置检查与重载
-docker exec 1Panel-openresty-xjMh nginx -t
-docker exec 1Panel-openresty-xjMh nginx -s reload
-
-# 连数据库
-docker exec -it 1Panel-postgresql-2MLg psql -U user_JectHy -d gmsr
-```
-
-## 重新部署
-
-本地改动代码后（需要能免密 SSH 到服务器）：
-
-```bash
-cd gmsr/deploy
-./deploy.sh backend     # 只更新后端：同步源码 → 服务器 Maven 打包 → 替换 jar → 重启
-./deploy.sh frontend    # 只更新前端：本地 npm build → 上传 dist → reload OpenResty
-./deploy.sh all         # 两个都更
-```
-
-## 本地开发
-
-```bash
-# 后端（需要 JDK 25 + Maven；数据库指向服务器的 54233 端口即可）
-cd gmsr/backend
-GMSR_DB_URL='jdbc:postgresql://<YOUR_SERVER_IP>:54233/gmsr?currentSchema=gmsr' \
-GMSR_DB_USER=gmsr_app GMSR_DB_PASSWORD=CHANGE_ME_DB_PASSWORD \
-mvn spring-boot:run
-
-# 前端（vite 已把 /api 代理到 127.0.0.1:18080）
-cd gmsr/frontend
-npm install && npm run dev     # http://127.0.0.1:5173
-
-# 构建产物冒烟测试（jsdom 加载真实 bundle，校验渲染 + 接口 + 无报错）
-npm run build && node smoke-test.mjs http://<YOUR_SERVER_IP>:8080
 ```
 
 ## API 一览
@@ -359,15 +382,7 @@ npm run build && node smoke-test.mjs http://<YOUR_SERVER_IP>:8080
 - 时间安排 `scheduled` 是自由文本（例如「周五 21:00」），当前版本按单周排班表使用；
   排班是固定的一份。如果以后真的需要「按周/按日期」多套排班，可以再加一张周期表把 `boss_run` 挂上去（这次去掉了，因为人员几乎不变）。
 
-## 待办 / 可扩展方向
-
-- 多周排班（每周一份名单，可复制上一周）。
-- 席位拖拽排序（目前是「上人 / 整队 / 移除」按钮式操作）。
-- 标记完成时记录「谁标的、什么时候标的」（现在只存状态）。
-- 按战力校验某个 BOSS 是否达标（Excel 里只记录了战力，没有登记各 BOSS 的门槛）。
-- 导出当前排班为 Excel / 图片分享。
-
-## 安全设计（对外正式环境）
+## 安全设计
 
 | 措施 | 说明 |
 | --- | --- |
@@ -399,3 +414,60 @@ GMSR_LOGIN_MAX_ATTEMPTS=8          # 单账号失败锁定阈值
 GMSR_LOGIN_MAX_ATTEMPTS_PER_IP=30  # 单 IP 失败锁定阈值
 GMSR_LOGIN_LOCK_MINUTES=15         # 锁定时长（分钟）
 ```
+
+
+## 版本控制
+
+工作区根目录有 git 仓库，**每次改动前先提交一次**，出问题可以立刻回滚。
+
+```sh
+cd ..                            # 回到工作区根目录
+./git-helper.sh status           # 看改了哪些文件
+./git-helper.sh save "改了什么"    # 提交（自动拦截密钥等敏感文件）
+./git-helper.sh log              # 看历史
+./git-helper.sh undo             # 丢弃未提交的改动 ← 改坏了先执行这个
+./git-helper.sh rollback <提交号>  # 回退某次提交（保留历史，可再改回来）
+```
+
+**为什么要有这个**：项目早期没有版本控制，「语音音量调节」连续改坏 5 轮却无法回滚，
+只能靠手工比对还原代码，风险很高。现在有基线了：
+
+| 提交 | 说明 |
+| --- | --- |
+| `c3e2fde` | 版本控制基线（含融合车、按月周期、语音标识、手机适配）|
+
+**不会入库的内容**（见根目录 `.gitignore`）：
+- `.deploy/` 下的 SSH 私钥与明文密码（只放行 `ssh.sh` / `scp.sh` 两个脚本）
+- `application.yml`（含数据库 / Redis 密码）—— 线上用 `/opt/gmsr/gmsr.env` 覆盖
+- `node_modules` / `dist` / `target` / `.tools`（依赖与构建产物）
+
+## 待办 / 可扩展方向
+
+- 多周/多套排班（现在故意做成固定一份；如果以后真需要按周或按赛季分开，可以再加一张周期表，并恢复「复制上一份」的功能）。
+- 席位拖拽排序（目前是「上人 / 整队 / 移除」按钮式操作）。
+- 标记完成时记录「谁标的、什么时候标的」（现在只存状态）。
+- 按战力校验某个 BOSS 是否达标（Excel 里只记录了战力，没有登记各 BOSS 的门槛）。
+- 导出当前排班为 Excel / 图片分享。
+
+## 线上地址
+
+| 协议 | 地址 | 说明 |
+| --- | --- | --- |
+| HTTP | http://<YOUR_SERVER_IP>:8080/ | 主入口（OpenResty 8080） |
+| HTTPS | https://<YOUR_SERVER_IP>:4433/ | **必须用这个**（8080 会自动跳过来）；证书是私有 CA 签发的，需先按 /ca-install.html 安装信任 |
+
+### 账号
+
+| 账号类型 | 用户名 | 初始密码 | 能做什么 |
+| --- | --- | --- | --- |
+| 管理员 | `admin` | `CHANGE_ME_ADMIN_PASSWORD` | 全部功能：编排车次、管理 BOSS/群友、重置群友密码 |
+| 群友（14 个，自动创建） | **QQ 号**，例如 `100000013` | `CHANGE_ME_PLAYER_PASSWORD` | 查看全部排班；标记自己所在车次的「未完成 / 已完成」；改自己的密码 |
+| 访客（未登录） | — | — | 只读查看全部排班 |
+
+群友账号一律用 **QQ 号**登录，初始密码由管理员掌握并逐个告知本人；**本人首次登录会被强制要求设置自己的密码**。
+忘记密码找管理员，在「系统设置」点「重置密码」——重置后密码恢复为系统初始密码，本人下次登录必须重新设置。
+
+> 安全约定：**前端页面不显示任何账号规则或默认密码**，这些信息只在本文档（内部资料）与管理员手里。
+
+群友账号已按 QQ 对照表重建并绑定到对应群友档案（一个群友一个账号）。
+管理员也可以在「系统设置」里关闭某个账号的 boss排班 权限（变回只读）。
