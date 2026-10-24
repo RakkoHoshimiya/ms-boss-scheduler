@@ -55,8 +55,8 @@ public class BossController {
     }
 
     @GetMapping("/bosses")
-    public List<BossView> bosses(@org.springframework.web.bind.annotation.RequestParam(required = false) String week) {
-        return bossService.listBosses(week);
+    public List<BossView> bosses() {
+        return bossService.listBosses();
     }
 
     @GetMapping("/bosses/{id}")

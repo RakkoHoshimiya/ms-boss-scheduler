@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
-import type { PlayerRunView, PlayerView, RunView, WeekDetail } from '../api/types';
+import type { PlayerRunView, PlayerView, RunView } from '../api/types';
 import { useAuth } from '../components/AuthContext';
 import { useToast } from '../components/Toast';
 import { memberTooltip, statusLabel, tierClass, tierText } from '../components/ui';
@@ -16,10 +16,8 @@ export default function MyRunsPage() {
   const [myRuns, setMyRuns] = useState<PlayerRunView[]>([]);
   const [runs, setRuns] = useState<RunView[]>([]);
   const [loading, setLoading] = useState(true);
-  const [weeks, setWeeks] = useState<WeekDetail | null>(null);
   /** 全部 BOSS（判断哪些属于融合车） */
   const [bosses, setBosses] = useState<BossView[]>([]);
-  const [weekKey, setWeekKey] = useState<string>('');
 
   const load = () => {
     if (!user?.playerId) {
@@ -28,7 +26,7 @@ export default function MyRunsPage() {
       return;
     }
     setLoading(true);
-    Promise.all([api.playerRuns(user.playerId, weekKey), api.runsOfWeek(weekKey), api.bosses()])
+    Promise.all([api.playerRuns(user.playerId), api.runs(), api.bosses()])
       .then(([mine, all, bossList]) => {
         setMyRuns(mine);
         setRuns(all);
@@ -39,20 +37,8 @@ export default function MyRunsPage() {
   };
 
   useEffect(() => {
-    api
-      .weekTriples()
-      .then((detail) => {
-        setWeeks(detail);
-        setWeekKey(detail.currentWeekKey);
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (weekKey) {
-      load();
-    }
-  }, [user?.playerId, weekKey]);
+    load();
+  }, [user?.playerId]);
 
   useEffect(() => {
     api
@@ -106,7 +92,7 @@ export default function MyRunsPage() {
   const [bossFilter, setBossFilter] = useState('');
 
   /**
-   * 角色下拉选项：只从「我本周真的排到的车」里提取。
+   * 角色下拉选项：只从「我真的排到的车」里提取。
    * 用 characterId 区分 —— 同一玩家可能有同职业的两个角色，只按职业名会混。
    */
   const charOptions = useMemo(() => {
@@ -173,18 +159,7 @@ export default function MyRunsPage() {
         )}
       </div>
 
-      {user?.playerId && weeks ? (
-        <div className="toolbar">
-          <select value={weekKey} onChange={(e) => setWeekKey(e.target.value)} style={{ width: 250 }}>
-            <option value={weeks.lastWeek.weekKey}>上周（{weeks.lastWeek.label}）</option>
-            <option value={weeks.thisWeek.weekKey}>本周（{weeks.thisWeek.label}）</option>
-            <option value={weeks.nextWeek.weekKey}>下周（{weeks.nextWeek.label}）</option>
-          </select>
-          <span className="muted">切换周期查看你要打的车</span>
-        </div>
-      ) : null}
-
-      {/* 快速筛选：按角色 / 按 BOSS（可叠加，只列本周真的排到的） */}
+      {/* 快速筛选：按角色 / 按 BOSS（可叠加，只列真的排到的） */}
       {user?.playerId && mergedRuns.length > 0 ? (
         <div className="toolbar" style={{ marginTop: -6 }}>
           <select
@@ -280,7 +255,7 @@ export default function MyRunsPage() {
           ) : loading ? (
             <p className="muted">加载中…</p>
           ) : mergedRuns.length === 0 ? (
-            <p className="muted">这周还没有排到你的车，等管理员更新排班吧。</p>
+            <p className="muted">还没有排到你的车，等管理员安排吧。</p>
           ) : visibleRuns.length === 0 ? (
             <p className="muted">当前筛选条件下没有车次，换个角色/BOSS 或点「清除筛选」。</p>
           ) : (

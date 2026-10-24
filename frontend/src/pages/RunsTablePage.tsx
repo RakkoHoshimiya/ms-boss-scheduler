@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import type { BossView, RunView, WeekDetail } from '../api/types';
+import type { BossView, RunView } from '../api/types';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
 import { useDevice } from '../components/DeviceContext';
@@ -22,12 +22,9 @@ export default function RunsTablePage() {
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(true);
   const [myRunIds, setMyRunIds] = useState<number[]>([]);
-  const [weeks, setWeeks] = useState<WeekDetail | null>(null);
-  const [weekKey, setWeekKey] = useState<string>('');
-
-  const load = (key?: string) => {
+  const load = () => {
     setLoading(true);
-    Promise.all([key ? api.runsOfWeek(key) : api.runs(), api.bosses()])
+    Promise.all([api.runs(), api.bosses()])
       .then(([runList, bossList]) => {
         setRuns(runList);
         setBosses(bossList);
@@ -37,14 +34,7 @@ export default function RunsTablePage() {
   };
 
   useEffect(() => {
-    api
-      .weekTriples()
-      .then((detail) => {
-        setWeeks(detail);
-        setWeekKey(detail.currentWeekKey);
-        load(detail.currentWeekKey);
-      })
-      .catch(() => load());
+    load();
   }, []);
 
   useEffect(() => {
@@ -137,13 +127,6 @@ export default function RunsTablePage() {
       </div>
 
       <div className={`toolbar${isMobile ? ' toolbar-sticky' : ''}`}>
-        {weeks ? (
-          <select value={weekKey} onChange={(e) => { setWeekKey(e.target.value); load(e.target.value); }} style={{ width: 200 }}>
-            <option value={weeks.lastWeek.weekKey}>上周（{weeks.lastWeek.label}）</option>
-            <option value={weeks.thisWeek.weekKey}>本周（{weeks.thisWeek.label}）</option>
-            <option value={weeks.nextWeek.weekKey}>下周（{weeks.nextWeek.label}）</option>
-          </select>
-        ) : null}
         <select
           value={groupFilter}
           onChange={(e) => {
@@ -175,7 +158,7 @@ export default function RunsTablePage() {
           onChange={(e) => setKeyword(e.target.value)}
           style={{ maxWidth: 260 }}
         />
-        <button className="btn" onClick={() => load(weekKey)}>
+        <button className="btn" onClick={() => load()}>
           刷新
         </button>
         {canSchedule ? (

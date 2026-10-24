@@ -14,7 +14,8 @@
     "verify:webrtc": "node --experimental-strip-types verify-webrtc.mjs",
     "verify:audio": "node --experimental-strip-types verify-audio-gain.mjs",
     "verify:volume-ui": "node verify-volume-ui.mjs",
-    "verify:myruns-sort": "node --experimental-strip-types verify-myruns-sort.mjs"
+    "verify:myruns-sort": "node --experimental-strip-types verify-myruns-sort.mjs",
+    "verify:layout-switch": "node verify-layout-switch.mjs"
   },
   "dependencies": {
     "livekit-client": "^2.22.4",

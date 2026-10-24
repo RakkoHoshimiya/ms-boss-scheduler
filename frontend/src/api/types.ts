@@ -35,8 +35,10 @@ export interface PlayerView {
   id: number;
   /** 显示名称 */
   nickname: string;
-  /** 登录用的 QQ 号 */
+  /** 登录用的 QQ 号；非管理员且不是本人时为空（不可见） */
   qq?: string | null;
+  /** 这个群友是否登记过 QQ（用于区分「没登记」和「无权查看」） */
+  hasQq?: boolean;
   remark?: string | null;
   active: boolean;
   sortOrder: number;
@@ -63,6 +65,12 @@ export interface BossView {
   tierLabel: string;
   /** 这个 BOSS 实际存在的难度（排班页的难度选项以它为准） */
   tiers?: string[];
+  /**
+   * 游戏里**实际存在**的难度（后端 BossTierCatalog 给出）。
+   * 编辑界面据此禁用不存在的难度（如监视者卡尔洛斯没有 Hard）；
+   * 空数组或缺省表示未登记，不做限制。
+   */
+  allowedTiers?: string[];
   capacity: number;
   sortOrder: number;
   enabled: boolean;
@@ -75,8 +83,6 @@ export interface BossView {
   comboName?: string | null;
   /** 融合车固定难度 */
   comboTier?: string | null;
-  /** 是否按月刷新（老黑能量车）：周期用 上月/本月/下月 */
-  monthly?: boolean;
 }
 
 export interface MemberView {
@@ -99,8 +105,6 @@ export interface MemberView {
 
 export interface RunView {
   id: number;
-  weekKey?: string | null;
-  weekLabel?: string | null;
   bossId: number;
   bossName: string;
   bossIconKey?: string | null;
@@ -170,25 +174,6 @@ export interface PlayerRunView {
   characterId?: number;
   characterJob: string;
   characterPower: number;
-  weekKey?: string | null;
-  weekLabel?: string | null;
-}
-
-/** 排班周期（周四 ~ 下周三） */
-export interface WeekView {
-  weekKey: string;
-  label: string;
-  startDate: string;
-  endDate: string;
-  note?: string | null;
-  runCount: number;
-}
-
-export interface WeekDetail {
-  lastWeek: WeekView;
-  thisWeek: WeekView;
-  nextWeek: WeekView;
-  currentWeekKey: string;
 }
 
 /** 语音频道 */

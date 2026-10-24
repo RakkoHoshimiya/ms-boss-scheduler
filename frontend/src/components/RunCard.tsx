@@ -117,7 +117,6 @@ export default function RunCard({ run, mine, canEdit, canMark, onStatus, onEdite
       {settingOpen ? (
         <RunFormModal
           bossId={run.bossId}
-          weekKey={run.weekKey}
           initial={run}
           onClose={() => setSettingOpen(false)}
           onSaved={() => {

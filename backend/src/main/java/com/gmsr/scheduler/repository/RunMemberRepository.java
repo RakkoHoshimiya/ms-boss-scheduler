@@ -33,12 +33,9 @@ public interface RunMemberRepository extends JpaRepository<RunMember, Long> {
     @EntityGraph(attributePaths = {"character", "character.player", "run", "run.boss", "run.boss.group"})
     List<RunMember> findByCharacterIdOrderByIdAsc(Long characterId);
 
-    @EntityGraph(attributePaths = {"character", "character.player", "run", "run.boss", "run.boss.group", "run.week"})
+    @EntityGraph(attributePaths = {"character", "character.player", "run", "run.boss", "run.boss.group"})
     List<RunMember> findByCharacterPlayerIdOrderByIdAsc(Long playerId);
 
-    /** 某个群友某个周期的车次。 */
-    @EntityGraph(attributePaths = {"character", "character.player", "run", "run.boss", "run.boss.group", "run.week"})
-    List<RunMember> findByCharacterPlayerIdAndRunWeekWeekKeyOrderByIdAsc(Long playerId, String weekKey);
 
     @Query("select m.run.id, count(m) from RunMember m group by m.run.id")
     List<Object[]> countGroupedByRun();

@@ -12,7 +12,6 @@ import com.gmsr.scheduler.dto.RunDtos.RunView;
 import com.gmsr.scheduler.security.CurrentUser;
 import com.gmsr.scheduler.service.BusinessException;
 import com.gmsr.scheduler.service.RunService;
-import com.gmsr.scheduler.service.WeekService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +38,8 @@ public class RunController {
     }
 
     @GetMapping("/runs")
-    public List<RunView> runs(@RequestParam(required = false) String week) {
-        return week == null || week.isBlank() ? runService.list() : runService.listByWeek(week);
+    public List<RunView> runs() {
+        return runService.list();
     }
 
     @GetMapping("/runs/{id}")
@@ -136,12 +135,10 @@ public class RunController {
         return runService.swapMembers(memberId, request.otherMemberId());
     }
 
-    /** 某个群友的车次安排；不传 week 表示当前周期。 */
+    /** 某个群友的车次安排。 */
     @GetMapping("/players/{playerId}/runs")
-    public List<PlayerRunView> playerRuns(
-            @PathVariable Long playerId,
-            @RequestParam(required = false) String week) {
-        return runService.playerRuns(playerId, week == null || week.isBlank() ? WeekService.currentKey() : week);
+    public List<PlayerRunView> playerRuns(@PathVariable Long playerId) {
+        return runService.playerRuns(playerId);
     }
 
     /** 复制一趟车到同一 BOSS 下的新序号。 */
@@ -149,7 +146,6 @@ public class RunController {
     public RunView copy(@PathVariable Long id) {
         RunView source = runService.get(id);
         RunView created = runService.create(new RunRequest(
-                source.weekKey(),
                 source.bossId(),
                 source.tier(),
                 null,

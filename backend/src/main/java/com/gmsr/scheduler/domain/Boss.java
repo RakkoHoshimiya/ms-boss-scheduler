@@ -40,14 +40,6 @@ public class Boss extends AuditedEntity {
     @Column(name = "combo_key", length = 32)
     private String comboKey;
 
-    /**
-     * 是否按**月**刷新（而不是按每周四 CD）。
-     * 例如「老黑能量车」每个月才刷新一次，排班时要用 上月/本月/下月，
-     * 而不是 上周/本周/下周。
-     */
-    @Column(nullable = false)
-    private boolean monthly = false;
-
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
 
@@ -142,13 +134,5 @@ public class Boss extends AuditedEntity {
 
     public void setComboKey(String comboKey) {
         this.comboKey = comboKey;
-    }
-
-    public boolean isMonthly() {
-        return monthly;
-    }
-
-    public void setMonthly(boolean monthly) {
-        this.monthly = monthly;
     }
 }

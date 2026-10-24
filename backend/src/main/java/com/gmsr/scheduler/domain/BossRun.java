@@ -9,7 +9,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
-/** 车次：某个 BOSS 的一次组队。 */
+/** 车次：某个 BOSS 的一次组队。不再按周分组 —— 排班是固定的，时间不参与组织。 */
 @Entity
 @Table(name = "boss_run")
 public class BossRun extends AuditedEntity {
@@ -17,11 +17,6 @@ public class BossRun extends AuditedEntity {
     public enum Status {
         PLANNED, DONE, CANCELED
     }
-
-    /** 所属排班周期（周四 ~ 下周三）。 */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "week_id")
-    private WeekSchedule week;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "boss_id", nullable = false)
@@ -44,14 +39,6 @@ public class BossRun extends AuditedEntity {
 
     @Column(length = 255)
     private String note;
-
-    public WeekSchedule getWeek() {
-        return week;
-    }
-
-    public void setWeek(WeekSchedule week) {
-        this.week = week;
-    }
 
     public Boss getBoss() {
         return boss;

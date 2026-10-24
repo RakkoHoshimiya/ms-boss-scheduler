@@ -10,7 +10,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const BACKEND = process.argv[2] ?? 'https://<YOUR_SERVER_IP>:4433';
 const distDir = path.resolve('dist');
 const ADMIN = { username: 'admin', password: 'CHANGE_ME_ADMIN_PASSWORD' };
-// 专用冒烟测试账号（管理员建的，绑定玩家「群友C」）。
+// 专用冒烟测试账号（管理员建的，绑定玩家「群友E」）。
 // 不要用真人账号：群友会自己改密码，测试会莫名其妙失败。
 const PLAYER = { username: 'smoke', password: process.env.GMSR_SMOKE_PASSWORD ?? 'CHANGE_ME_SMOKE_PASSWORD' };
 
@@ -246,10 +246,11 @@ results.push(
 // 该页面的验证方式是真实浏览器打开 #/voice。
 results.push(
   await renderPage({
-    name: 'boss排班·第2~4层（难度 → 周期 → 排班）',
+    name: 'boss排班·第2~3层（难度 → 排班，已去掉周期）',
     hash: '#/bosses',
     token: adminToken,
-    expect: ['选择难度', '选择周期', '排班', '一键复制'],
+    // 周机制已移除：不再有「选择周期」和「一键复制」
+    expect: ['选择难度', '排班', '新增车次'],
     clickBoss: '监视者卡尔洛斯',
   }),
 );

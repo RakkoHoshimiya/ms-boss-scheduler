@@ -26,8 +26,15 @@ public final class PlayerDtos {
             Long id,
             /** 显示名称 */
             String nickname,
-            /** 登录用的 QQ 号 */
+            /** 登录用的 QQ 号；非管理员且不是本人时为空（不可见） */
             String qq,
+            /**
+             * 这个群友**是否登记过** QQ。
+             *
+             * 为什么需要它：qq 对无权限的人是 null，但前端不能把 null 直接当成「未登记」——
+             * 那样会让所有人看到「未登记」并显示「N 位还没登记 QQ 号」的错误统计。
+             */
+            boolean hasQq,
             String remark,
             boolean active,
             int sortOrder,

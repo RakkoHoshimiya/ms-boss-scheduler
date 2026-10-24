@@ -1,6 +1,7 @@
 package com.gmsr.scheduler.service;
 
 import com.gmsr.scheduler.domain.GameCharacter;
+import com.gmsr.scheduler.domain.JobCatalog;
 import com.gmsr.scheduler.domain.Player;
 import com.gmsr.scheduler.dto.PlayerDtos.CharacterRequest;
 import com.gmsr.scheduler.dto.PlayerDtos.MyCharacterRequest;
@@ -47,9 +48,11 @@ public class PlayerService {
          * （SecurityConfig 里 `GET /api/**` permitAll）。
          * 如果连 QQ 一起返回，任何人都能拿到全群用户名，再配合初始口令
          * 批量尝试登录、接管尚未改密的账号。所以只有管理员才看得到明文 QQ，
-         * 其余情况一律置空 —— 前端本来就有对非管理员打码的逻辑，这里直接从源头掐掉。
+         * 其余情况一律置空；但**本人**可以看到自己的 QQ（否则他连登录名都不知道）。
+         * 同时返回 hasQq，让前端能区分「没登记」和「无权看」。
          */
-        boolean canSeeQq = CurrentUser.isAdmin();
+        boolean canSeeAllQq = CurrentUser.isStaff();
+        Long myPlayerId = CurrentUser.playerId();
         List<PlayerView> result = new ArrayList<>(players.size());
         for (Player player : players) {
             List<CharacterView> own = characters.stream()
@@ -61,7 +64,9 @@ public class PlayerService {
             result.add(new PlayerView(
                     player.getId(),
                     player.getNickname(),
-                    canSeeQq ? player.getQq() : null,
+                    // 管理员/编辑看全部；其他人只能看**自己**的（自己的登录名不算隐私，否则本人也无从知道账号）
+                    (canSeeAllQq || player.getId().equals(myPlayerId)) ? player.getQq() : null,
+                    player.getQq() != null && !player.getQq().isBlank(),
                     player.getRemark(),
                     player.isActive(),
                     player.getSortOrder(),
@@ -203,6 +208,7 @@ public class PlayerService {
     public CharacterView createCharacter(CharacterRequest request) {
         Player player = playerRepository.findById(request.playerId())
                 .orElseThrow(() -> new NotFoundException("群友不存在：" + request.playerId()));
+        ensureJobUnique(player, request.job(), null);
         GameCharacter character = new GameCharacter();
         character.setPlayer(player);
         apply(character, request);
@@ -222,12 +228,36 @@ public class PlayerService {
                     .orElseThrow(() -> new NotFoundException("群友不存在：" + request.playerId()));
             character.setPlayer(player);
         }
+        ensureJobUnique(character.getPlayer(), request.job(), id);
         apply(character, request);
         if (request.sortOrder() != null) {
             character.setSortOrder(request.sortOrder());
         }
         characterRepository.save(character);
         return toView(character);
+    }
+
+    /**
+     * 同一个群友不能登记两个同职业的角色。
+     *
+     * 为什么：一个群友在同一趟车里只能上一个角色，同职业登记两条没有排班意义，
+     * 而且会让人以为「他有两个 Kanna」——
+     * 实际上历史数据里就是这么来的（Kanna 和 阴阳师 被当成两个职业录了两条）。
+     *
+     * 比较前先折算标准名，所以「Kanna」和「阴阳师」会被认成同一个。
+     */
+    private void ensureJobUnique(Player player, String job, Long selfId) {
+        String target = JobCatalog.canonical(job);
+        if (target.isEmpty()) {
+            return;
+        }
+        boolean duplicated = characterRepository.findByPlayerIdOrderBySortOrderAscIdAsc(player.getId()).stream()
+                .anyMatch(c -> (selfId == null || !c.getId().equals(selfId))
+                        && JobCatalog.sameJob(c.getJob(), target));
+        if (duplicated) {
+            throw new BusinessException("「" + player.getNickname() + "」已经有 " + target
+                    + " 这个角色了（同一职业不能重复登记，阴阳师与 Kanna 视为同一职业）");
+        }
     }
 
     @Transactional
@@ -238,7 +268,8 @@ public class PlayerService {
     }
 
     private void apply(GameCharacter character, CharacterRequest request) {
-        character.setJob(request.job().trim());
+        // 职业名归一化：Kanna / 阴阳师 / 칸나 是同一个职业，统一存标准名
+        character.setJob(JobCatalog.canonical(request.job()));
         character.setPower(request.power() == null ? 0 : request.power());
         character.setMainChar(Boolean.TRUE.equals(request.mainChar()));
         character.setNote(request.note());

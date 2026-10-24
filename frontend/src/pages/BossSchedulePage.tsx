@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { api } from '../api/client';
 import { useDevice } from '../components/DeviceContext';
 import { groupBossesForDisplay } from '../features/combo';
-import type { BossView, GroupView, PlayerView, RunView, WeekDetail } from '../api/types';
+import type { BossView, GroupView, PlayerView, RunView } from '../api/types';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import BossIcon from '../components/BossIcon';
@@ -17,7 +17,6 @@ import {
   TIER_OPTIONS,
   TIER_ORDER,
 } from '../components/ui';
-import WeekTabs, { MONTH_SLOT_LABEL, WEEK_SLOT_LABEL, weekOf, type WeekSlot } from '../components/WeekTabs';
 
 /** 正在拖动的内容 */
 type DragPayload =
@@ -42,24 +41,15 @@ export default function BossSchedulePage() {
   const [bosses, setBosses] = useState<BossView[]>([]);
   const [groups, setGroups] = useState<GroupView[]>([]);
   const [players, setPlayers] = useState<PlayerView[]>([]);
-  const [weeks, setWeeks] = useState<WeekDetail | null>(null);
-  /**
-   * 按月刷新的 BOSS（老黑能量车）用的是「上月 / 本月 / 下月」，
-   * 与按周四 CD 的周周期完全不同，所以单独存一份。
-   */
-  const [months, setMonths] = useState<WeekDetail | null>(null);
-  const [selectedWeek, setSelectedWeek] = useState<WeekSlot>('this');
   const [selectedTier, setSelectedTier] = useState<string>('');
   /** 角色池按群友（显示名）筛选，空 = 全部 */
   const [poolPlayer, setPoolPlayer] = useState('');
-  const [copying, setCopying] = useState(false);
-  /** 缓存的周期数据：weekKey -> 该周全部车次（用来算每个 BOSS 的真实趟数） */
-  const [weekRuns, setWeekRuns] = useState<Record<string, RunView[]>>({});
-  const [weekCounts, setWeekCounts] = useState<Record<string, Record<string, number>>>({});
   const [currentBoss, setCurrentBoss] = useState<BossView | null>(null);
   /** 当前选中的是融合车时，这里放它的全部成员 BOSS（否则为空） */
   const [currentCombo, setCurrentCombo] = useState<BossView[]>([]);
   const [runs, setRuns] = useState<RunView[]>([]);
+  /** 当前 runs 是按哪一组 BOSS 加载的（切换 BOSS 时用它判断数据是否已经换过来） */
+  const [runsLoadedFor, setRunsLoadedFor] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   /**
@@ -99,12 +89,11 @@ export default function BossSchedulePage() {
 
   const loadBase = () => {
     setLoading(true);
-    Promise.all([api.bosses(), api.groups(), api.players(), api.weekTriples()])
-      .then(([bossList, groupList, playerList, weekDetail]) => {
+    Promise.all([api.bosses(), api.groups(), api.players()])
+      .then(([bossList, groupList, playerList]) => {
         setBosses(bossList);
         setGroups(groupList);
         setPlayers(playerList);
-        setWeeks(weekDetail);
       })
       .catch((error) => notify(error instanceof Error ? error.message : '加载失败', 'error'))
       .finally(() => setLoading(false));
@@ -112,76 +101,27 @@ export default function BossSchedulePage() {
 
   useEffect(loadBase, []);
 
-  /** 加载上周 / 本周 / 下周 各 BOSS 的趟数（作为车次缓存为空时的兜底） */
-  const loadWeekCounts = () => {
-    api
-      .runCounts()
-      .then(setWeekCounts)
-      .catch(() => setWeekCounts({}));
-  };
-
-  useEffect(loadWeekCounts, []);
-
-  /**
-   * 把三个周期的车次都拉下来缓存：
-   * 周期标签要显示的是「当前 BOSS + 当前难度」在那一周有几趟，
-   * 只靠接口的「BOSS 总趟数」算不出来，必须知道每趟车的难度。
-   */
-  const preloadWeeks = async (detail: WeekDetail) => {
-    const keys = [detail.lastWeek.weekKey, detail.thisWeek.weekKey, detail.nextWeek.weekKey];
-    for (const key of keys) {
-      if (weekRuns[key]) {
-        continue;
-      }
-      try {
-        const all = await api.runsOfWeek(key);
-        setWeekRuns((prev) => (prev[key] ? prev : { ...prev, [key]: all }));
-      } catch {
-        // 某一周拉不到就跳过，周期标签会退回接口统计
-      }
-    }
-  };
-
-  // 按月 BOSS 的周期按需加载（只在真正打开这类 BOSS 时才请求）
-  useEffect(() => {
-    if (currentBoss?.monthly && !months) {
-      api
-        .monthTriples()
-        .then(setMonths)
-        .catch(() => notify('加载月周期失败', 'error'));
-    }
-  }, [currentBoss?.monthly, months, notify]);
-
-  useEffect(() => {
-    if (weeks) {
-      void preloadWeeks(weeks);
-    }
-  }, [weeks?.currentWeekKey]);
-
-  /** 当前 BOSS 是否按月刷新（老黑能量车） */
-  const isMonthlyBoss = currentBoss?.monthly === true;
-  /** 当前生效的周期数据：按月 BOSS 用月份，其余用周 */
-  const periodDetail = isMonthlyBoss ? months : weeks;
-  /** 周期文案：按月 BOSS 显示 上月/本月/下月 */
-  const SLOT_LABEL = isMonthlyBoss ? MONTH_SLOT_LABEL : WEEK_SLOT_LABEL;
-  const weekKey = periodDetail ? weekOf(periodDetail, selectedWeek).weekKey : '';
-
   /** 换 BOSS 时重置角色池筛选 */
   useEffect(() => {
     setPoolPlayer('');
   }, [currentBoss?.id]);
 
-  const loadRuns = (bossIds: number[], key?: string) => {
-    const target = key ?? weekKey;
-    if (!target || bossIds.length === 0) {
+  /**
+   * 加载车次。
+   *
+   * 现在没有「周」的概念了，一次取回全部车次，再按当前 BOSS 过滤 ——
+   * 数据量很小（几十到几百条），比原来按周分别请求更简单也更快。
+   */
+  const loadRuns = (bossIds: number[]) => {
+    if (bossIds.length === 0) {
       return;
     }
     api
-      .runsOfWeek(target)
+      .runs()
       .then((all) => {
-        setWeekRuns((prev) => ({ ...prev, [target]: all }));
         // 融合车：把全部成员 BOSS 的车次都取回来，前端再按车次序号聚合成一张卡
         setRuns(all.filter((run) => bossIds.includes(run.bossId)));
+        setRunsLoadedFor(bossIds.join(','));
       })
       .catch((error) => notify(error instanceof Error ? error.message : '加载车次失败', 'error'));
   };
@@ -193,10 +133,10 @@ export default function BossSchedulePage() {
   );
 
   useEffect(() => {
-    if (viewBossIds.length > 0 && weekKey) {
-      loadRuns(viewBossIds, weekKey);
+    if (viewBossIds.length > 0) {
+      loadRuns(viewBossIds);
     }
-  }, [viewBossIds.join(','), weekKey]);
+  }, [viewBossIds.join(',')]);
 
   /** 这个 BOSS 实际存在的难度（来自 BOSS 配置，而不是「本周排过什么」） */
   const availableTiers = useMemo(() => {
@@ -208,12 +148,30 @@ export default function BossSchedulePage() {
     return sortTiers(used.length > 0 ? used : [currentBoss?.tier ?? 'N']);
   }, [currentBoss?.tiers, currentBoss?.tier, runs]);
 
-  /** 没选难度时自动选中第一个可用难度 */
+  /** 记录「已经为哪个 BOSS 自动选过难度」，避免用户手选后被改回去 */
+  const tierPickedFor = useRef<number | null>(null);
+
+  /**
+   * 打开某个 BOSS 时自动选一个难度。
+   *
+   * 规则：优先选**真的排过车**的难度。
+   * 以前固定取「难度清单里的第一个」，于是「监视者卡尔洛斯」清单是 E/N/C/EX、
+   * 车却都排在 Normal，一进来就显示 Easy 和 0 趟，看着像坏了。
+   */
   useEffect(() => {
-    if (availableTiers.length > 0 && !availableTiers.includes(selectedTier)) {
-      setSelectedTier(availableTiers[0]);
+    if (!currentBoss || availableTiers.length === 0) {
+      return;
     }
-  }, [availableTiers.join(','), selectedTier]);
+    if (tierPickedFor.current === currentBoss.id) {
+      return; // 这个 BOSS 已经选过，尊重用户后续的手动切换
+    }
+    if (runsLoadedFor !== viewBossIds.join(',')) {
+      return; // 车次还是上一个 BOSS 的，等它换过来再判断
+    }
+    const withRuns = availableTiers.find((tier) => runs.some((run) => run.tier === tier));
+    setSelectedTier(withRuns ?? availableTiers[0]);
+    tierPickedFor.current = currentBoss.id;
+  }, [currentBoss?.id, availableTiers.join(','), runs, runsLoadedFor]);
 
   /**
    * 融合车的「主 BOSS」：趟数以它为准。
@@ -224,35 +182,6 @@ export default function BossSchedulePage() {
    * 所以融合车的趟数一律以主 BOSS 为准，其余成员 BOSS 同步跟进。
    */
   const primaryComboBossId = currentCombo.length > 0 ? currentCombo[0].id : null;
-
-  /** 当前 BOSS 在上周 / 本周 / 下周 的真实趟数（有缓存用缓存，否则用接口统计，都没有就是 0） */
-  /**
-   * 周期标签上的趟数 = 当前 BOSS + 当前难度 在那一周的车次数。
-   * （以前只统计 BOSS 总数，导致切到 Easy 也显示 Normal 的趟数。）
-   */
-  const bossWeekCounts = useMemo<Partial<Record<WeekSlot, number>>>(() => {
-    if (!periodDetail || !currentBoss) {
-      return {};
-    }
-    /**
-     * 统计口径用的 BOSS id。
-     * 融合车条目的 id 是前端合成的负数（用来和真实 BOSS 区分），接口里没有它的数据，
-     * 所以融合车要按「主 BOSS」统计趟数 —— 主 BOSS 有几趟，融合车就有几趟。
-     */
-    const countBossId = primaryComboBossId ?? currentBoss.id;
-    const pick = (slot: WeekSlot) => {
-      const week = weekOf(periodDetail, slot);
-      const cached = weekRuns[week.weekKey];
-      if (cached) {
-        return cached.filter(
-          (run) => run.bossId === countBossId && (!selectedTier || run.tier === selectedTier)
-        ).length;
-      }
-      // 缓存还没到位时退回接口（只能拿到 BOSS 总数，仅作过渡显示）
-      return weekCounts[week.weekKey]?.[String(countBossId)] ?? 0;
-    };
-    return { last: pick('last'), this: pick('this'), next: pick('next') };
-  }, [periodDetail, currentBoss?.id, selectedTier, runs, weekRuns, weekCounts, primaryComboBossId]);
 
   /** 当前难度下的车次 */
   const visibleRuns = useMemo(
@@ -281,7 +210,13 @@ export default function BossSchedulePage() {
         .slice()
         .sort((a, b) => a.runIndex - b.runIndex)
         .map((run) => ({
-          key: 'run-' + run.runIndex,
+          /**
+           * key 必须用**唯一 id**，不能用趟次序号。
+           * 趟次是「每个难度各自编号」的，所以同一个 BOSS 可能同时有
+           * Normal 第2趟 和 Chaos 第2趟 —— 用 runIndex 当 key 会撞车，
+           * React 会复用同一个 DOM 节点，把其中一趟的内容渲染两次。
+           */
+          key: 'run-' + run.id,
           runIndex: run.runIndex,
           primary: run,
           runIds: [run.id],
@@ -301,7 +236,7 @@ export default function BossSchedulePage() {
         (r) => r.runIndex === run.runIndex && r.tier === run.tier && viewBossIds.includes(r.bossId),
       );
       return {
-        key: 'combo-' + run.runIndex,
+        key: 'combo-' + run.id,
         runIndex: run.runIndex,
         primary: run,
         runIds: siblings.length > 0 ? siblings.map((r) => r.id) : [run.id],
@@ -322,48 +257,12 @@ export default function BossSchedulePage() {
     return runs.filter((r) => r.bossId !== primaryComboBossId && !primaryIndexes.has(r.runIndex));
   }, [runs, currentCombo.length, primaryComboBossId]);
 
-  /** 一键复制：本周←上周 / 下周←本周 */
-  const copyFromPreviousWeek = async () => {
-    if (!periodDetail || !currentBoss) {
-      return;
-    }
-    const source = selectedWeek === 'next' ? periodDetail.thisWeek : periodDetail.lastWeek;
-    const target = weekOf(periodDetail, selectedWeek);
-    if (selectedWeek === 'last') {
-      notify('上周是复制来源，不能再往前复制', 'error');
-      return;
-    }
-    const hasData = visibleRuns.length > 0;
-    const tierLabel = selectedTier ? tierText(selectedTier) : '';
-    const hint = hasData
-      ? `「${currentBoss.name}」${tierLabel} 在「${target.label}」已经有 ${runs.length} 趟车次，复制会清空重来，确认覆盖？`
-      : `把「${source.label}」里「${currentBoss.name}」${tierLabel} 的排班复制到「${target.label}」？复制后可以直接改。`;
-    if (!window.confirm(hint)) {
-      return;
-    }
-    setCopying(true);
-    try {
-      const result = await api.copyBossWeek(source.weekKey, target.weekKey, currentBoss.id, selectedTier, hasData);
-      notify(result.note ?? '复制完成');
-      const detail = await api.weekTriples();
-      setWeeks(detail);
-      setWeekRuns((prev) => { const next = { ...prev }; delete next[target.weekKey]; return next; });
-      loadRuns(viewBossIds, target.weekKey);
-      loadWeekCounts();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : '复制失败', 'error');
-    } finally {
-      setCopying(false);
-    }
-  };
-
   /** 重新加载当前视图的车次（融合车会一次拿回全部成员 BOSS）。 */
   const reloadRuns = async () => {
-    if (!weekKey || viewBossIds.length === 0) {
+    if (viewBossIds.length === 0) {
       return;
     }
-    const all = await api.runsOfWeek(weekKey);
-    setWeekRuns((prev) => ({ ...prev, [weekKey]: all }));
+    const all = await api.runs();
     setRuns(all.filter((run) => viewBossIds.includes(run.bossId)));
   };
 
@@ -376,11 +275,25 @@ export default function BossSchedulePage() {
 
   const poolCharacters = useMemo(
     () =>
-      players.flatMap((player) =>
-        player.characters
-          .filter((c) => !usedCharacterIds.has(c.id))
-          .map((c) => ({ ...c, playerNickname: player.nickname })),
-      ),
+      players
+        .flatMap((player) =>
+          player.characters
+            .filter((c) => !usedCharacterIds.has(c.id))
+            .map((c) => ({ ...c, playerNickname: player.nickname })),
+        )
+        /**
+         * 战力从高到低。
+         *
+         * 拖车上人时通常先看高战力角色，所以默认按战力降序。
+         * 战力相同再按「群友昵称 → 职业」排，保证顺序稳定 ——
+         * 否则同战力角色的先后会随接口返回顺序变化，池子看起来会「跳」。
+         */
+        .sort(
+          (a, b) =>
+            b.power - a.power ||
+            a.playerNickname.localeCompare(b.playerNickname, 'zh-Hans-CN') ||
+            a.job.localeCompare(b.job, 'zh-Hans-CN'),
+        ),
     [players, usedCharacterIds],
   );
 
@@ -440,7 +353,7 @@ export default function BossSchedulePage() {
    *
    * 为什么必须这样：融合车在数据层是「每个成员 BOSS 各一条 boss_run」，
    * 同一个角色在这 7 条车次上各有**自己独立的 run_member 行**（memberId 完全不同，
-   * 例如群友D/剑豪在 7 条上是 319/323/327/331/335/339/343）。
+   * 例如群友F/剑豪在 7 条上是 319/323/327/331/335/339/343）。
    * 后端 RunController 又是按 memberId 定位席位的 —— 所以绝不能拿同一个 memberId
    * 去循环操作多个 runId（第 2 次起必然失败）。
    */
@@ -666,13 +579,7 @@ export default function BossSchedulePage() {
         for (const runId of ids) {
           await api.addMember(runId, { characterId: selected.characterId });
         }
-        if (ids.length > 1) {
-          await reloadRuns();
-        } else {
-          const all = await api.runsOfWeek(weekKey);
-          setWeekRuns((prev) => ({ ...prev, [weekKey]: all }));
-          setRuns(all.filter((r) => viewBossIds.includes(r.bossId)));
-        }
+        await reloadRuns();
         notify(`已把「${selected.label}」排入第 ${targetRun.runIndex} 趟车`);
       } catch (error) {
         notify(error instanceof Error ? error.message : '上车失败', 'error');
@@ -926,10 +833,8 @@ export default function BossSchedulePage() {
       }
       notify('已删除车次');
       if (currentBoss) {
-        setWeekRuns({});
         loadRuns(viewBossIds);
         loadBase();
-        loadWeekCounts();
       }
     } catch (error) {
       notify(error instanceof Error ? error.message : '删除失败', 'error');
@@ -962,6 +867,26 @@ export default function BossSchedulePage() {
       notify(error instanceof Error ? error.message : '删除失败', 'error');
     }
   };
+
+  /**
+   * 「编辑 BOSS」弹窗节点。
+   *
+   * 为什么要抽成变量：详情视图是**提前 return** 的。如果只把弹窗写在列表视图里，
+   * 在详情页点「编辑」时 state 虽然变了，但弹窗根本不在 DOM 里 ——
+   * 表现就是「点了没反应」，退回 BOSS 列表才突然弹出来。
+   * 所以详情视图和列表视图都要渲染这个节点。
+   */
+  const bossFormModal = bossForm ? (
+    <BossFormModal
+      groups={groups}
+      initial={bossForm === 'new' ? null : bossForm}
+      onClose={() => setBossForm(null)}
+      onSaved={() => {
+        setBossForm(null);
+        loadBase();
+      }}
+    />
+  ) : null;
 
   // ---------------- BOSS 详情：车次编排 ----------------
   if (currentBoss) {
@@ -1032,7 +957,7 @@ export default function BossSchedulePage() {
         <div className="step-block" hidden={currentCombo.length > 0}>
           <div className="step-title">
             <span className="step-no">1</span> 选择难度
-            <span className="muted">这个 BOSS 本周排过的难度</span>
+            <span className="muted">这个 BOSS 有的难度（数字是趟数）</span>
           </div>
           <div className="tier-tabs">
             {(availableTiers.length > 0 ? availableTiers : [boss.tier]).map((tier) => (
@@ -1047,54 +972,15 @@ export default function BossSchedulePage() {
               </button>
             ))}
             {availableTiers.length === 0 ? (
-              <span className="muted">本周还没有车次，用下面的「一键复制」或「+ 新增车次」开始排</span>
+              <span className="muted">这个 BOSS 还没有车次，用右上角「+ 新增车次」开始排</span>
             ) : null}
           </div>
         </div>
 
-        {/* 第 3 步：选周期 */}
-        {periodDetail ? (
-          <div className="step-block">
-            <div className="step-title">
-              <span className="step-no">2</span> 选择周期
-            </div>
-            <WeekTabs
-              detail={periodDetail}
-              monthly={isMonthlyBoss}
-              active={selectedWeek}
-              counts={bossWeekCounts}
-              onChange={(slot) => {
-                setSelectedWeek(slot);
-                loadRuns(viewBossIds, weekOf(periodDetail, slot).weekKey);
-              }}
-            />
-            <div className="week-bar">
-              <div>
-                <strong>{SLOT_LABEL[selectedWeek]}</strong>
-                <span className="muted">
-                  {' '}
-                  {weekOf(periodDetail, selectedWeek).label} · {tierText(selectedTier)}{' '}
-                  {currentCombo.length > 0 ? runCards.length : visibleRuns.length} 趟
-                </span>
-              </div>
-              <div className="spacer" />
-              {selectedWeek === 'last' ? (
-                <span className="muted">上周是复制来源，可复制到本周 / 下周</span>
-              ) : (
-                <button className="btn primary" onClick={copyFromPreviousWeek} disabled={copying}>
-                  {copying
-                    ? '复制中…'
-                    : `⧉ 一键复制${SLOT_LABEL[selectedWeek === 'next' ? 'this' : 'last']}「${boss.name}」${tierText(selectedTier)}排班`}
-                </button>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {/* 第 4 步：排班 */}
+        {/* 第 2 步：排班 */}
         <div className="step-block">
           <div className="step-title">
-            <span className="step-no">3</span> 排班
+            <span className="step-no">2</span> 排班
             <span className="muted">拖动席位换车，或从左下角色池拖进来</span>
           </div>
         </div>
@@ -1102,7 +988,7 @@ export default function BossSchedulePage() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-title">
             待选角色池
-            <span className="muted">把角色拖到下面的车次里即可上车（已排进本周该 BOSS 的角色不再显示）</span>
+            <span className="muted">把角色拖到下面的车次里即可上车（已排进该 BOSS 的角色不再显示）</span>
             <div className="spacer" />
             <select
               value={poolPlayer}
@@ -1398,8 +1284,7 @@ export default function BossSchedulePage() {
 
         {visibleRuns.length === 0 && !loading ? (
           <p className="muted">
-            这个 BOSS 在「{SLOT_LABEL[selectedWeek]} · {tierText(selectedTier)}」还没有车次，
-            点右上角「+ 新增车次」或上面的「一键复制」开始排。
+            这个 BOSS 在「{tierText(selectedTier)}」还没有车次，点右上角「+ 新增车次」开始排。
           </p>
         ) : null}
 
@@ -1407,7 +1292,6 @@ export default function BossSchedulePage() {
           <RunFormModal
             bossId={runForm.bossId}
             bossName={runForm.bossName}
-            weekKey={weekKey}
             defaultTier={runForm.tier}
             initial={runForm.run ?? null}
             onClose={() => setRunForm(null)}
@@ -1419,6 +1303,9 @@ export default function BossSchedulePage() {
             }}
           />
         ) : null}
+
+        {/* 详情页点「编辑」也要立即弹出 —— 与列表视图共用同一个节点 */}
+        {bossFormModal}
       </div>
     );
   }
@@ -1520,17 +1407,7 @@ export default function BossSchedulePage() {
         </div>
       </div>
 
-      {bossForm ? (
-        <BossFormModal
-          groups={groups}
-          initial={bossForm === 'new' ? null : bossForm}
-          onClose={() => setBossForm(null)}
-          onSaved={() => {
-            setBossForm(null);
-            loadBase();
-          }}
-        />
-      ) : null}
+      {bossFormModal}
     </div>
   );
 }
@@ -1551,6 +1428,16 @@ function BossFormModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [tier, setTier] = useState(initial?.tier ?? 'NONE');
   const [tiers, setTiers] = useState<string[]>(initial?.tiers ?? []);
+
+  /**
+   * 游戏里实际存在的难度。
+   *
+   * 后端 BossTierCatalog 给的事实，例如「监视者卡尔洛斯」没有 Hard。
+   * 不在这个范围内的难度**禁用勾选**，避免存进游戏里根本不存在的组合；
+   * 空数组表示这个 BOSS 还没登记，此时不限制（方便先排班再补登记）。
+   */
+  const allowedTiers = initial?.allowedTiers ?? [];
+  const tierAllowed = (value: string) => allowedTiers.length === 0 || allowedTiers.includes(value);
   const [capacity, setCapacity] = useState(String(initial?.capacity ?? 6));
   const [iconKey, setIconKey] = useState(initial?.iconKey ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
@@ -1638,7 +1525,7 @@ function BossFormModal({
           <label className="field" style={{ marginBottom: 0 }}>
             <span>默认难度</span>
             <select value={tier} onChange={(e) => setTier(e.target.value)}>
-              {TIER_OPTIONS.map((item) => (
+              {TIER_OPTIONS.filter((item) => tierAllowed(item.value)).map((item) => (
                 <option key={item.value} value={item.value}>
                   {item.label}
                 </option>
@@ -1661,10 +1548,15 @@ function BossFormModal({
           <span>这个 BOSS 实际存在的难度（排班页只显示勾选的难度）</span>
           <div className="tier-checks">
             {TIER_OPTIONS.filter((item) => item.value !== 'NONE').map((item) => (
-              <label key={item.value} className={`tier-check ${tiers.includes(item.value) ? 'on' : ''}`}>
+              <label
+                key={item.value}
+                className={`tier-check ${tiers.includes(item.value) ? 'on' : ''} ${tierAllowed(item.value) ? '' : 'off'}`}
+                title={tierAllowed(item.value) ? '' : `游戏里没有「${item.label}」难度`}
+              >
                 <input
                   type="checkbox"
                   checked={tiers.includes(item.value)}
+                  disabled={!tierAllowed(item.value)}
                   onChange={(e) =>
                     setTiers((prev) =>
                       e.target.checked
@@ -1674,6 +1566,7 @@ function BossFormModal({
                   }
                 />
                 {item.label}
+                {tierAllowed(item.value) ? null : <span className="tier-none">（游戏无此难度）</span>}
               </label>
             ))}
           </div>

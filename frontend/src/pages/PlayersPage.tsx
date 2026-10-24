@@ -66,7 +66,13 @@ export default function PlayersPage() {
     }
   };
 
-  const noQq = players.filter((player) => !player.qq).length;
+  /**
+   * 真正没登记 QQ 的人数。
+   *
+   * 不能写成 !player.qq：无权限的人收到的 qq 恒为 null，
+   * 那样会把「你看不到」误算成「没登记」，页面还会显示错误的「N 位还没登记 QQ 号」。
+   */
+  const noQq = players.filter((player) => !player.qq && !player.hasQq).length;
 
   return (
     <div>
@@ -115,11 +121,15 @@ export default function PlayersPage() {
                 <tr key={player.id}>
                   <td>
                     {player.qq ? (
-                      <code className="qq">{canEdit ? player.qq : maskQq(player.qq)}</code>
-                    ) : (
-                      <span className="muted">
-                        未登记
+                      <code className="qq">{player.qq}</code>
+                    ) : player.hasQq ? (
+                      /* 后端对无权限的人置空 qq，但 hasQq 证明「登记过、你看不到」，
+                         不能显示成「未登记」—— 那会让人以为数据丢了 */
+                      <span className="muted" title="QQ 号是登录账号，只有管理员和本人能看到">
+                        仅管理员可见
                       </span>
+                    ) : (
+                      <span className="muted">未登记</span>
                     )}
                   </td>
                   <td>
@@ -271,7 +281,7 @@ function PlayerFormModal({
             inputMode="numeric"
             value={qq ?? ''}
             onChange={(e) => setQq(e.target.value)}
-            placeholder="例如 100000003"
+            placeholder="例如 100000013"
           />
         </label>
         <label className="field">
@@ -409,10 +419,3 @@ function CharacterFormModal({
   );
 }
 
-/** 非管理员只显示脱敏后的 QQ 号，避免在公开页面暴露完整账号。 */
-function maskQq(qq: string): string {
-  if (qq.length <= 6) {
-    return qq.slice(0, 2) + '****';
-  }
-  return `${qq.slice(0, 3)}****${qq.slice(-3)}`;
-}

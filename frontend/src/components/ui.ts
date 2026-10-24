@@ -50,7 +50,6 @@ export const JOB_PRESETS = [
   '火毒',
   'Sia',
   '黑骑',
-  '阴阳师',
   '豹弩',
   '冰雷',
   '超能',

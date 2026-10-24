@@ -4,6 +4,7 @@ import com.gmsr.scheduler.domain.Boss;
 import com.gmsr.scheduler.domain.BossCombo;
 import com.gmsr.scheduler.domain.BossGroup;
 import com.gmsr.scheduler.domain.BossTier;
+import com.gmsr.scheduler.domain.BossTierCatalog;
 import com.gmsr.scheduler.dto.BossDtos.BossRequest;
 import com.gmsr.scheduler.dto.BossDtos.BossView;
 import com.gmsr.scheduler.dto.BossDtos.GroupRequest;
@@ -53,24 +54,13 @@ public class BossService {
         return result;
     }
 
+    /** 全部 BOSS（含每个 BOSS 的车次数与已排席位数）。 */
     @Transactional(readOnly = true)
     public List<BossView> listBosses() {
-        return listBosses(null);
-    }
-
-    /** weekKey 为空时统计全部周期；否则只统计该周期。 */
-    @Transactional(readOnly = true)
-    public List<BossView> listBosses(String weekKey) {
         List<Boss> bosses = bossRepository.findAllByOrderByGroupSortOrderAscSortOrderAscIdAsc();
         Map<Long, Long> runCountByBoss = new HashMap<>();
-        if (weekKey != null && !weekKey.isBlank()) {
-            for (BossRun run : runRepository.findByWeekWeekKeyOrderByBossSortOrderAscRunIndexAsc(weekKey)) {
-                runCountByBoss.merge(run.getBoss().getId(), 1L, Long::sum);
-            }
-        } else {
-            for (Object[] row : runRepository.countGroupedByBoss()) {
-                runCountByBoss.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
-            }
+        for (Object[] row : runRepository.countGroupedByBoss()) {
+            runCountByBoss.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
         }
         List<BossView> result = new ArrayList<>(bosses.size());
         for (Boss boss : bosses) {
@@ -84,6 +74,7 @@ public class BossService {
                     boss.getTier().name(),
                     boss.getTier().label(),
                     tiersOf(boss),
+                    BossTierCatalog.allowedTiersOf(boss.getName()),
                     boss.getCapacity(),
                     boss.getSortOrder(),
                     boss.isEnabled(),
@@ -91,7 +82,6 @@ public class BossService {
                     boss.getComboKey(),
                     comboNameOf(boss.getComboKey()),
                     comboTierOf(boss.getComboKey()),
-                    boss.isMonthly(),
                     bossRuns,
                     0));
         }
@@ -221,7 +211,9 @@ public class BossService {
             boss.setEnabled(request.enabled());
         }
         if (request.tiers() != null) {
-            boss.setTiers(normalizeTiers(request.tiers(), boss.getTier()));
+            String normalized = normalizeTiers(request.tiers(), boss.getTier());
+            ensureTiersExistInGame(boss.getName(), normalized);
+            boss.setTiers(normalized);
         }
         if (request.iconKey() != null) {
             boss.setIconKey(request.iconKey().isBlank() ? null : request.iconKey().trim());
@@ -243,6 +235,31 @@ public class BossService {
             }
         }
         return result;
+    }
+
+    /**
+     * 校验难度是否都在游戏里真实存在。
+     *
+     * 前端会禁用不存在的难度，但接口可以被直接调用，所以后端必须再挡一次 ——
+     * 否则还是能存进「卡尔洛斯 + Hard」这种脏数据。
+     */
+    private void ensureTiersExistInGame(String bossName, String normalizedTiers) {
+        List<String> allowed = BossTierCatalog.allowedTiersOf(bossName);
+        if (allowed.isEmpty() || normalizedTiers == null || normalizedTiers.isBlank()) {
+            // 未登记的 BOSS 不做限制，方便先排班再补登记
+            return;
+        }
+        for (String tier : normalizedTiers.split(",")) {
+            String value = tier.trim();
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (!allowed.contains(value)) {
+                throw new BusinessException(
+                        "「" + bossName + "」在游戏里没有 " + BossTierCatalog.labelOf(value) + " 难度（可选："
+                                + String.join(" / ", allowed.stream().map(BossTierCatalog::labelOf).toList()) + "）");
+            }
+        }
     }
 
     /** 规范化难度列表：去掉 NONE / 非法值，保持固定顺序，并把默认难度包含进去。 */

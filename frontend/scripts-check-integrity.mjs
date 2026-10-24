@@ -57,7 +57,8 @@ const get = async (path) => {
 
 const bosses = await get('/bosses');
 const bossById = new Map(bosses.map((b) => [b.id, b]));
-const weeks = await get('/weeks/triples');
+// 周机制已移除：排班是固定的一份，直接取全部车次
+const allRuns = await get('/runs');
 
 const combos = new Map();
 for (const boss of bosses.filter((b) => b.comboKey)) {
@@ -67,11 +68,9 @@ for (const boss of bosses.filter((b) => b.comboKey)) {
   combos.get(boss.comboKey).push(boss);
 }
 
-for (const slot of ['lastWeek', 'thisWeek', 'nextWeek']) {
-  const weekKey = weeks[slot].weekKey;
-  const raw = await get(`/weeks/${weekKey}/runs`);
-  const runs = Array.isArray(raw) ? raw : raw.runs || [];
-  console.log(`\n=== 周期 ${weekKey}（${runs.length} 条车次）`);
+{
+  const runs = Array.isArray(allRuns) ? allRuns : allRuns.runs || [];
+  console.log(`\n=== 全部车次（${runs.length} 条）`);
 
   for (const run of runs) {
     const capacity = run.capacity || (bossById.get(run.bossId) || {}).capacity || 6;
@@ -137,10 +136,8 @@ for (const slot of ['lastWeek', 'thisWeek', 'nextWeek']) {
 
 for (const [comboKey, members] of combos) {
   console.log(`\n=== 融合车 ${comboKey}（${members.length} 个成员 BOSS）`);
-  for (const slot of ['lastWeek', 'thisWeek', 'nextWeek']) {
-    const weekKey = weeks[slot].weekKey;
-    const raw = await get(`/weeks/${weekKey}/runs`);
-    const runs = (Array.isArray(raw) ? raw : raw.runs || []).filter((r) =>
+  {
+    const runs = (Array.isArray(allRuns) ? allRuns : allRuns.runs || []).filter((r) =>
       members.some((m) => m.id === r.bossId),
     );
     const byIndex = new Map();
@@ -151,7 +148,7 @@ for (const [comboKey, members] of combos) {
       byIndex.get(run.runIndex).push(run);
     }
     if (byIndex.size === 0) {
-      console.log(`  ${weekKey}: 无融合车`);
+      console.log(`  无融合车`);
       continue;
     }
     for (const [runIndex, group] of byIndex) {
@@ -162,7 +159,7 @@ for (const [comboKey, members] of combos) {
           .join('、');
         note(
           'WARN',
-          `${weekKey} 融合车第${runIndex}趟只有 ${group.length}/${members.length} 个 BOSS 有记录（缺：${missing}）`,
+          `融合车第${runIndex}趟只有 ${group.length}/${members.length} 个 BOSS 有记录（缺：${missing}）`,
         );
       }
       const signatures = group.map((g) =>
@@ -171,7 +168,7 @@ for (const [comboKey, members] of combos) {
       if (new Set(signatures).size > 1) {
         note(
           'ERROR',
-          `${weekKey} 融合车第${runIndex}趟 成员 BOSS 阵容不一致：` +
+          `融合车第${runIndex}趟 成员 BOSS 阵容不一致：` +
             group.map((g) => `${g.bossName}=${(g.members || []).length}人`).join(', '),
         );
       }

@@ -30,8 +30,6 @@ public final class RunDtos {
 
     public record RunView(
             Long id,
-            String weekKey,
-            String weekLabel,
             Long bossId,
             String bossName,
             String bossIconKey,
@@ -49,8 +47,6 @@ public final class RunDtos {
     }
 
     public record RunRequest(
-            /** 排班周期；为空表示本周 */
-            String weekKey,
             @NotNull(message = "BOSS 不能为空") Long bossId,
             String tier,
             @Min(value = 1, message = "车次序号至少为 1") Integer runIndex,
@@ -100,8 +96,6 @@ public final class RunDtos {
             /** 角色 id：前端「按角色筛选」需要（只靠职业名会混淆同职业的两个角色） */
             Long characterId,
             String characterJob,
-            int characterPower,
-            String weekKey,
-            String weekLabel) {
+            int characterPower) {
     }
 }

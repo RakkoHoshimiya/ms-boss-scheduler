@@ -8,8 +8,6 @@ import type {
   PlayerRunView,
   PlayerView,
   RunView,
-  WeekDetail,
-  WeekView,
   UserView,
   VoiceRooms,
   VoiceToken,
@@ -263,26 +261,7 @@ export const api = {
   deleteBoss: (id: number) => request<void>(`/bosses/${id}`, { method: 'DELETE' }),
 
   runs: () => request<RunView[]>('/runs'),
-  runsOfWeek: (weekKey: string) => request<RunView[]>(`/weeks/${weekKey}/runs`),
-  /** 上周 / 本周 / 下周 各 BOSS 的趟数：weekKey -> (bossId -> 趟数) */
-  runCounts: () => request<Record<string, Record<string, number>>>('/weeks/run-counts'),
-  /** 按月刷新的 BOSS 用的周期（上月/本月/下月） */
-  monthTriples: () => request<WeekDetail>('/weeks/month-triples'),
-  weekTriples: () => request<WeekDetail>('/weeks/triples'),
-  weeks: () => request<{ currentWeekKey: string; weeks: WeekView[] }>('/weeks'),
-  /** 按单个 BOSS 把某周的排班复制到另一周 */
-  copyBossWeek: (fromWeekKey: string, toWeekKey: string, bossId: number, tier?: string, overwrite = false) =>
-    request<WeekView>('/weeks/copy-boss', {
-      method: 'POST',
-      body: JSON.stringify({ fromWeekKey, toWeekKey, bossId, tier, overwrite }),
-    }),
-  copyWeek: (fromWeekKey: string, toWeekKey: string, overwrite = false) =>
-    request<WeekView>('/weeks/copy', {
-      method: 'POST',
-      body: JSON.stringify({ fromWeekKey, toWeekKey, overwrite }),
-    }),
   createRun: (body: {
-    weekKey?: string | null;
     bossId: number;
     tier?: string;
     runIndex?: number;
@@ -294,8 +273,7 @@ export const api = {
   updateRun: (
     id: number,
     body: {
-      weekKey?: string | null;
-      bossId?: number;
+        bossId?: number;
       tier?: string;
       runIndex?: number;
       scheduled?: string;
@@ -331,10 +309,7 @@ export const api = {
     }),
   replaceMembers: (runId: number, members: Array<{ characterId: number; role?: string; status?: string; note?: string }>) =>
     request<RunView>(`/runs/${runId}/members`, { method: 'PUT', body: JSON.stringify({ members }) }),
-  playerRuns: (playerId: number, weekKey?: string) =>
-    request<PlayerRunView[]>(
-      `/players/${playerId}/runs${weekKey ? `?week=${weekKey}` : ''}`,
-    ),
+  playerRuns: (playerId: number) => request<PlayerRunView[]>(`/players/${playerId}/runs`),
 
   users: () => request<UserView[]>('/admin/users'),
   createUser: (body: {

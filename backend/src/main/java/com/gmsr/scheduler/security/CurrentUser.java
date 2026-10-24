@@ -34,6 +34,17 @@ public final class CurrentUser {
         return null;
     }
 
+    /**
+     * 是否有权限管理群友（改资料 / 登记角色）。
+     * 与前端 canEdit 的口径一致：ADMIN 或 EDITOR —— 能改就应该能看到 QQ，
+     * 否则会出现「能覆盖 QQ 却看不到 QQ」的怪事。
+     */
+    public static boolean isStaff() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_EDITOR".equals(a.getAuthority()));
+    }
+
     public static boolean isAdmin() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth != null && auth.getAuthorities().stream()

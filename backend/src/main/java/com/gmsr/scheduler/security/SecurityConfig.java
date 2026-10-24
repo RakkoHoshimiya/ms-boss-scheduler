@@ -73,7 +73,7 @@ public class SecurityConfig {
                         // boss排班（BOSS、分组、车次、周期复制）：有排班权限的账号都能改
                         // ADMIN 天然拥有 ROLE_SCHEDULE，其他账号看账号上的 canSchedule
                         // 注意分组接口的真实路径是 /api/boss-groups（曾误写成 /api/groups，导致规则不生效）
-                        .requestMatchers("/api/bosses/**", "/api/boss-groups/**", "/api/runs/**", "/api/weeks/**")
+                        .requestMatchers("/api/bosses/**", "/api/boss-groups/**", "/api/runs/**")
                         .hasRole("SCHEDULE")
                         .requestMatchers(HttpMethod.POST, "/api/**").hasAnyRole("ADMIN", "EDITOR")
                         .requestMatchers(HttpMethod.PUT, "/api/**").hasAnyRole("ADMIN", "EDITOR")

@@ -9,7 +9,6 @@ import { STATUS_OPTIONS, TIER_OPTIONS } from './ui';
 export default function RunFormModal({
   bossId,
   bossName,
-  weekKey,
   defaultTier,
   initial,
   onClose,
@@ -18,7 +17,6 @@ export default function RunFormModal({
   bossId: number;
   bossName?: string;
   /** 新建车次时归属的排班周期 */
-  weekKey?: string | null;
   /** 新建车次时预选的难度 */
   defaultTier?: string | null;
   initial: RunView | null;
@@ -40,7 +38,6 @@ export default function RunFormModal({
     setBusy(true);
     try {
       const body = {
-        weekKey: weekKey ?? initial?.weekKey ?? null,
         bossId,
         tier: form.tier || undefined,
         runIndex: form.runIndex ? Number(form.runIndex) : undefined,

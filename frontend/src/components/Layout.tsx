@@ -192,6 +192,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             {preference === 'desktop' ? '手机版' : '电脑版'}
           </button>
         </div>
+        {/*
+          切到「电脑版」后，.is-desktop 会把 .mobile-top 整个隐藏 ——
+          手机版切换按钮就长在那个顶栏里，于是按钮跟着消失，用户再也切不回来。
+          所以这里再放一个常驻的浮动按钮，只在「用户手动选了电脑版」时出现。
+        */}
+        {preference === 'desktop' ? (
+          <button
+            className="layout-fab"
+            title="切回手机版（恢复按屏幕自动识别）"
+            onClick={() => setPreference('auto')}
+          >
+            📱 手机版
+          </button>
+        ) : null}
         <nav className="mobile-nav">
           {NAV.filter((item) => visibleNav(user, item)).map((item) => (
             <NavLink

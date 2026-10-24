@@ -7,6 +7,8 @@ import com.gmsr.scheduler.domain.BossCombo;
 import com.gmsr.scheduler.domain.BossGroup;
 import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.domain.BossTier;
+import com.gmsr.scheduler.domain.BossTierCatalog;
+import com.gmsr.scheduler.domain.JobCatalog;
 import com.gmsr.scheduler.domain.GameCharacter;
 import com.gmsr.scheduler.domain.Player;
 import com.gmsr.scheduler.domain.RunMember;
@@ -37,8 +39,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 一次性数据整理（幂等，可反复执行）：
  * 1. 按 GMSR 实际规则修正 BOSS 组队人数上限（猴 / 凶星 / 林波 = 3 人，其余 6 人）
  * 2. 修正从 Excel 解析时串行的 BOSS 名（H敦凯尔）
- * 3. 合并「群友K」到「群友L」
- * 4. 删除已退出群友（扯 / Fycie / 群友S）及其账号，并清掉他们占用的席位
+ * 3. 合并「群友O」到「群友Y」
+ * 4. 删除已退出群友（扯 / 群友Z / 群友W）及其账号，并清掉他们占用的席位
  * 5. 按 QQ 对照表写入 QQ 号与显示名称
  * 6. 登录账号统一改成 QQ 号，初始密码 CHANGE_ME_PLAYER_PASSWORD，并强制首次登录修改密码
  */
@@ -51,17 +53,16 @@ public class DataMigrator implements ApplicationRunner {
     /**
      * 一次性历史迁移数据：QQ 号 -> 群友昵称。
      *
-     * 开源版本里这些是**示例值**（真实 QQ 与昵称已移除）。
-     * 迁移执行一次后会被 marker 标记，不会重复运行；
-     * 换到自己的环境时，把下面几行换成自己的「QQ 号 -> 昵称」即可。
+     * 开源版本里是**示例值**（真实 QQ 与昵称已移除）。
+     * 迁移执行一次即被 marker 标记；换环境时把下面几行换成自己的数据。
      */
     private static final Map<String, String> QQ_TO_NAME = new LinkedHashMap<>();
 
-    /** 旧昵称 -> 新昵称（群友改名后仍能定位到原记录）。开源版留空即可。 */
+    /** 旧昵称 -> 新昵称（群友改名后仍能定位）。开源版留空即可。 */
     private static final Map<String, String> RENAMES = new LinkedHashMap<>();
 
     static {
-        // 示例数据：换环境时替换成自己的
+        // 示例数据
         QQ_TO_NAME.put("100000001", "群友1");
         QQ_TO_NAME.put("100000002", "群友2");
         QQ_TO_NAME.put("100000003", "群友3");
@@ -132,24 +133,18 @@ public class DataMigrator implements ApplicationRunner {
      * 顺序固定为 Easy / Normal / Hard / Chaos / Extreme。
      * 逗号后面的第一个是默认难度。
      */
-    private static final Map<String, String> BOSS_TIERS = new LinkedHashMap<>();
+    /**
+     * 每个 BOSS 的难度清单，直接取自 {@link BossTierCatalog}。
+     *
+     * 这里以前自己写了一份，结果和数据库对不上（卡尔洛斯代码里有 Hard、库里没有），
+     * 现在统一以 BossTierCatalog 为唯一来源。
+     */
+    private static final Map<String, String> BOSS_TIERS = buildBossTiers();
 
-    static {
-        BOSS_TIERS.put("神选者塞伦", "N,H,EX");
-        BOSS_TIERS.put("监视者卡尔洛斯", "N,H,C,EX");
-        BOSS_TIERS.put("最初的对抗者", "E,N,H,EX");
-        BOSS_TIERS.put("卡琳", "N,H,EX");
-        BOSS_TIERS.put("灿烂的凶星", "N,H,C");
-        BOSS_TIERS.put("林波", "N,H");
-        BOSS_TIERS.put("斯乌", "N,H,C,EX");
-        BOSS_TIERS.put("戴米安", "N,H");
-        BOSS_TIERS.put("绿水灵王", "N,H,C");
-        BOSS_TIERS.put("老黑能量车", "H,EX");
-        BOSS_TIERS.put("路西德", "E,N,H");
-        BOSS_TIERS.put("威尔", "E,N,H");
-        BOSS_TIERS.put("至暗魔晶", "N,C");
-        BOSS_TIERS.put("觉醒希拉", "N,H");
-        BOSS_TIERS.put("敦凯尔", "N,H");
+    private static Map<String, String> buildBossTiers() {
+        Map<String, String> result = new LinkedHashMap<>();
+        BossTierCatalog.all().forEach((name, tiers) -> result.put(name, String.join(",", tiers)));
+        return result;
     }
 
     /** 默认难度（每个 BOSS 的 tiers 里的第一个可用中文名登记的难度）。 */
@@ -181,20 +176,19 @@ public class DataMigrator implements ApplicationRunner {
     /** 按游戏规则需要限制为 3 人的 BOSS */
     private static final List<String> THREE_MAN_BOSSES = List.of("猴", "凶星", "灿烂的凶星", "林波");
     /** 已退出群友，直接删除 */
-    private static final List<String> REMOVED_PLAYERS = List.of("群友P", "Fycie", "群友S");
+    private static final List<String> REMOVED_PLAYERS = List.of("群友K", "群友Z", "群友W");
     private static final String ACCOUNT_MARKER = "qq-accounts-v3";
     private static final String BOSS_ICON_MARKER = "boss-icons-v2";
     private static final String BOSS_NAME_MARKER = "boss-names-v2";
     private static final String BOSS_TIER_MARKER = "boss-tiers-v1";
     private static final String BOSS_COMBO_MARKER = "boss-combo-v1";
-    private static final String BOSS_MONTHLY_MARKER = "boss-monthly-v1";
     private static final String BOSS_CAPACITY_3PLAYER_MARKER = "boss-capacity-3player-v1";
     private static final String BOSS_ICON_KEY_EVILSTAR_MARKER = "boss-icon-evilstar-v1";
     private static final String SCHEDULE_MARKER = "schedule-permission-v1";
     private static final String GROUP_RENAME_MARKER = "group-rename-v1";
     private static final String SYNC_PLAYER_MARKER = "sync-player-account-v1";
-    private static final String MERGE_FROM = "群友K";
-    private static final String MERGE_TO = "群友L";
+    private static final String MERGE_FROM = "群友O";
+    private static final String MERGE_TO = "群友Y";
 
     private final BossGroupRepository groupRepository;
     private final BossRepository bossRepository;
@@ -204,7 +198,6 @@ public class DataMigrator implements ApplicationRunner {
     private final RunMemberRepository memberRepository;
     private final AppUserRepository userRepository;
     private final AppSettingRepository settingRepository;
-    private final WeekService weekService;
     private final PasswordEncoder passwordEncoder;
     private final String defaultPassword;
 
@@ -217,7 +210,6 @@ public class DataMigrator implements ApplicationRunner {
             RunMemberRepository memberRepository,
             AppUserRepository userRepository,
             AppSettingRepository settingRepository,
-            WeekService weekService,
             PasswordEncoder passwordEncoder,
             @Value("${gmsr.player.default-password:CHANGE_ME_PLAYER_PASSWORD}") String defaultPassword) {
         this.groupRepository = groupRepository;
@@ -228,7 +220,6 @@ public class DataMigrator implements ApplicationRunner {
         this.memberRepository = memberRepository;
         this.userRepository = userRepository;
         this.settingRepository = settingRepository;
-        this.weekService = weekService;
         this.passwordEncoder = passwordEncoder;
         this.defaultPassword = defaultPassword;
     }
@@ -236,7 +227,6 @@ public class DataMigrator implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        assignRunsToLastWeek();
         cleanBossNames();
         assignBossIcons();
         dedupeBosses();
@@ -250,9 +240,9 @@ public class DataMigrator implements ApplicationRunner {
         grantSchedulePermission();
         migrateBossTiers();
         migrateBossCombos();
-        migrateMonthlyBosses();
         fixThreePlayerBossCapacity();
         renameEvilStarIconKey();
+        normalizeCharacterJobs();
         restoreBosses();
         checkBossIconFiles();
         if (!markerExists(BOSS_NAME_MARKER)) {
@@ -321,28 +311,6 @@ public class DataMigrator implements ApplicationRunner {
                 .mapToInt(com.gmsr.scheduler.domain.Player::getSortOrder)
                 .max()
                 .orElse(0) + 1;
-    }
-
-    /** 0. 把历史车次归入「上周」，并建立 上周 / 本周 / 下周 三个周期。 */
-    private void assignRunsToLastWeek() {
-        LocalDate lastWeekStart = WeekService.weekStartOf(LocalDate.now()).minusWeeks(1);
-        String lastWeekKey = WeekService.keyOf(lastWeekStart);
-        long orphan = runRepository.countByWeekIsNull();
-        if (orphan > 0) {
-            com.gmsr.scheduler.domain.WeekSchedule week = weekService.ensureWeek(lastWeekKey, "上周");
-            List<BossRun> runs = runRepository.findAllByOrderByBossSortOrderAscRunIndexAsc();
-            int moved = 0;
-            for (BossRun run : runs) {
-                if (run.getWeek() == null) {
-                    run.setWeek(week);
-                    runRepository.save(run);
-                    moved++;
-                }
-            }
-            log.info("把 {} 趟历史车次归入上周（{}）", moved, lastWeekKey);
-        }
-        // 保证 上周 / 本周 / 下周 三个周期都存在
-        weekService.triples();
     }
 
     /** 0.1 去掉 BOSS 名称里的难度前缀，并把难度写进 tier 字段（名称只保留 BOSS 本身）。 */
@@ -539,6 +507,29 @@ public class DataMigrator implements ApplicationRunner {
     }
 
     /**
+     * 把历史数据里的职业别名改写成标准名。
+     *
+     * 例如「阴阳师」→「Kanna」（同一个职业）。
+     * 幂等：只有确实不同才写库，所以每次启动跑一次也没有副作用。
+     */
+    private void normalizeCharacterJobs() {
+        int fixed = 0;
+        for (GameCharacter character : characterRepository.findAllByOrderByPlayerSortOrderAscSortOrderAscIdAsc()) {
+            String canonical = JobCatalog.canonical(character.getJob());
+            if (!canonical.equals(character.getJob())) {
+                log.info("职业名归一化：{} {} -> {}", character.getPlayer().getNickname(), character.getJob(), canonical);
+                character.setJob(canonical);
+                characterRepository.save(character);
+                fixed++;
+            }
+        }
+        if (fixed > 0) {
+            characterRepository.flush();
+            log.info("职业名归一化完成：修正 {} 个角色", fixed);
+        }
+    }
+
+    /**
      * 「灿烂的凶星」的图标 key 从 baldrix 改为 evilstar。
      *
      * 原因：早期误以为它和 Baldrix（巴德利斯 / 人马）是同一个 BOSS，把图标命名成了 baldrix。
@@ -589,30 +580,6 @@ public class DataMigrator implements ApplicationRunner {
         if (!markerExists(BOSS_CAPACITY_3PLAYER_MARKER)) {
             saveMarker(BOSS_CAPACITY_3PLAYER_MARKER, "done");
         }
-    }
-
-    /**
-     * 按月刷新的 BOSS：老黑能量车不是每周四刷新，而是一个月刷新一次，
-     * 所以它的排班周期要用 上月/本月/下月，而不是 上周/本周/下周。
-     * 这里给它打上标志（以后有新的按月 BOSS 加进下面的名单即可）。
-     */
-    private void migrateMonthlyBosses() {
-        if (markerExists(BOSS_MONTHLY_MARKER)) {
-            return;
-        }
-        List<String> monthlyNames = List.of("老黑能量车");
-        int marked = 0;
-        for (Boss boss : bossRepository.findAllByOrderByGroupSortOrderAscSortOrderAscIdAsc()) {
-            boolean shouldBeMonthly = monthlyNames.contains(boss.getName());
-            if (boss.isMonthly() != shouldBeMonthly) {
-                boss.setMonthly(shouldBeMonthly);
-                bossRepository.save(boss);
-                marked++;
-            }
-        }
-        bossRepository.flush();
-        saveMarker(BOSS_MONTHLY_MARKER, "done");
-        log.info("按月刷新的 BOSS 迁移完成：调整 {} 个", marked);
     }
 
     /** 0.0a 启动自检：每个 BOSS 的图标文件必须存在，否则页面会显示裂图。 */
@@ -767,7 +734,7 @@ public class DataMigrator implements ApplicationRunner {
                 });
     }
 
-    /** 3. 群友K = 群友L：角色与已排席位都转到群友L名下 */
+    /** 3. 群友O = 群友Y：角色与已排席位都转到群友Y名下 */
     private void mergePlayers() {
         Player from = playerRepository.findByNickname(MERGE_FROM).orElse(null);
         Player to = playerRepository.findByNickname(MERGE_TO).orElse(null);
@@ -786,7 +753,7 @@ public class DataMigrator implements ApplicationRunner {
                     .findFirst()
                     .orElse(null);
             if (target == null) {
-                // 群友L名下没有同样的角色，直接把角色过继过去
+                // 群友Y名下没有同样的角色，直接把角色过继过去
                 character.setPlayer(to);
                 characterRepository.save(character);
                 toCharacters.add(character);

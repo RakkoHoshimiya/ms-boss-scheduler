@@ -5,7 +5,6 @@ import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.domain.BossTier;
 import com.gmsr.scheduler.domain.GameCharacter;
 import com.gmsr.scheduler.domain.RunMember;
-import com.gmsr.scheduler.domain.WeekSchedule;
 import com.gmsr.scheduler.dto.RunDtos.MemberRequest;
 import com.gmsr.scheduler.dto.RunDtos.MemberUpdateRequest;
 import com.gmsr.scheduler.dto.RunDtos.MemberView;
@@ -35,42 +34,22 @@ public class RunService {
     private final RunMemberRepository memberRepository;
     private final BossRepository bossRepository;
     private final GameCharacterRepository characterRepository;
-    private final WeekService weekService;
 
     public RunService(
             BossRunRepository runRepository,
             RunMemberRepository memberRepository,
             BossRepository bossRepository,
-            GameCharacterRepository characterRepository,
-            WeekService weekService) {
+            GameCharacterRepository characterRepository) {
         this.runRepository = runRepository;
         this.memberRepository = memberRepository;
         this.bossRepository = bossRepository;
         this.characterRepository = characterRepository;
-        this.weekService = weekService;
     }
 
-    /** 全部周期的车次。 */
+    /** 全部车次。 */
     @Transactional(readOnly = true)
     public List<RunView> list() {
         return assemble(runRepository.findAllByOrderByBossSortOrderAscRunIndexAsc());
-    }
-
-    /** 指定排班周期的车次；weekKey 为空时取本周。 */
-    @Transactional(readOnly = true)
-    public List<RunView> listByWeek(String weekKey) {
-        String key = resolveWeekKey(weekKey);
-        return assemble(runRepository.findByWeekWeekKeyOrderByBossSortOrderAscRunIndexAsc(key));
-    }
-
-    /** 解析周期标识：空 -> 本周；否则确保周期存在。 */
-    private String resolveWeekKey(String weekKey) {
-        if (weekKey == null || weekKey.isBlank()) {
-            String current = WeekService.currentKey();
-            weekService.ensureWeek(current, "本周");
-            return current;
-        }
-        return weekService.ensureWeek(weekKey, null).getWeekKey();
     }
 
     @Transactional(readOnly = true)
@@ -79,11 +58,10 @@ public class RunService {
         return assemble(List.of(run)).getFirst();
     }
 
-    @Transactional
-    /** 同 BOSS、同难度、同周下的下一个序号。 */
-    private int nextRunIndex(Boss boss, WeekSchedule week, BossTier tier) {
-        return runRepository.findByWeekWeekKeyOrderByBossSortOrderAscRunIndexAsc(week.getWeekKey()).stream()
-                .filter(run -> run.getBoss().getId().equals(boss.getId()) && run.getTier() == tier)
+    /** 同 BOSS、同难度下的下一个趟次序号。 */
+    private int nextRunIndex(Boss boss, BossTier tier) {
+        return runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).stream()
+                .filter(run -> run.getTier() == tier)
                 .mapToInt(BossRun::getRunIndex)
                 .max()
                 .orElse(0) + 1;
@@ -93,13 +71,11 @@ public class RunService {
     public RunView create(RunRequest request) {
         Boss boss = bossRepository.findById(request.bossId())
                 .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
-        WeekSchedule week = weekService.ensureWeek(resolveWeekKey(request.weekKey()), null);
         BossRun run = new BossRun();
-        run.setWeek(week);
         run.setBoss(boss);
         run.setTier(requireAllowedTier(boss, request.tier() == null ? boss.getTier().name() : request.tier()));
         run.setRunIndex(request.runIndex() == null
-                ? nextRunIndex(boss, week, run.getTier())
+                ? nextRunIndex(boss, run.getTier())
                 : request.runIndex());
         run.setScheduled(request.scheduled());
         run.setStatus(request.status() == null ? BossRun.Status.PLANNED : BossRun.Status.valueOf(request.status()));
@@ -111,9 +87,6 @@ public class RunService {
     @Transactional
     public RunView update(Long id, RunRequest request) {
         BossRun run = runRepository.findById(id).orElseThrow(() -> new NotFoundException("车次不存在：" + id));
-        if (request.weekKey() != null && !request.weekKey().isBlank()) {
-            run.setWeek(weekService.ensureWeek(request.weekKey(), null));
-        }
         if (request.bossId() != null && !request.bossId().equals(run.getBoss().getId())) {
             Boss boss = bossRepository.findById(request.bossId())
                     .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
@@ -143,22 +116,14 @@ public class RunService {
         runRepository.delete(run);
     }
 
-    /** 重排某个 BOSS 在当前周期的车次序号。 */
-    @Transactional
-    public List<RunView> resequence(Long bossId) {
-        String current = WeekService.currentKey();
-        return resequence(bossId, current);
-    }
-
     /**
-     * 把某个 BOSS 某周的车次重新编号。
+     * 把某个 BOSS 的车次重新编号。
      * 编号按「难度」分组各自从 1 开始（Normal 第1趟、第2趟…；Chaos 第1趟、第2趟…），
      * 因为排班页是按难度分开显示的。
      */
     @Transactional
-    public List<RunView> resequence(Long bossId, String weekKey) {
-        List<BossRun> runs = runRepository.findByWeekWeekKeyOrderByBossSortOrderAscRunIndexAsc(weekKey).stream()
-                .filter(run -> run.getBoss().getId().equals(bossId))
+    public List<RunView> resequence(Long bossId) {
+        List<BossRun> runs = runRepository.findByBossIdOrderByRunIndexAsc(bossId).stream()
                 .sorted(java.util.Comparator
                         .comparing((BossRun run) -> run.getTier().name())
                         .thenComparing(BossRun::getRunIndex)
@@ -446,16 +411,14 @@ public class RunService {
         return get(runId);
     }
 
-    /** 某个群友（账号）在哪些车次上；weekKey 为空表示全部周期。 */
+    /** 某个群友（账号）在哪些车次上。 */
     @Transactional(readOnly = true)
-    public List<PlayerRunView> playerRuns(Long playerId, String weekKey) {
+    public List<PlayerRunView> playerRuns(Long playerId) {
         Map<Long, Integer> counts = new LinkedHashMap<>();
         for (Object[] row : memberRepository.countGroupedByRun()) {
             counts.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
         }
-        List<RunMember> memberships = (weekKey == null || weekKey.isBlank())
-                ? memberRepository.findByCharacterPlayerIdOrderByIdAsc(playerId)
-                : memberRepository.findByCharacterPlayerIdAndRunWeekWeekKeyOrderByIdAsc(playerId, weekKey);
+        List<RunMember> memberships = memberRepository.findByCharacterPlayerIdOrderByIdAsc(playerId);
         return memberships.stream()
                 .map(m -> new PlayerRunView(
                         m.getRun().getId(),
@@ -470,9 +433,7 @@ public class RunService {
                         m.getRun().getBoss().getCapacity(),
                         m.getCharacter().getId(),
                         m.getCharacter().getJob(),
-                        m.getCharacter().getPower(),
-                        m.getRun().getWeek() == null ? null : m.getRun().getWeek().getWeekKey(),
-                        m.getRun().getWeek() == null ? null : m.getRun().getWeek().getLabel()))
+                        m.getCharacter().getPower()))
                 .toList();
     }
 
@@ -493,8 +454,6 @@ public class RunService {
             int powerTotal = members.stream().mapToInt(MemberView::power).sum();
             result.add(new RunView(
                     run.getId(),
-                    run.getWeek() == null ? null : run.getWeek().getWeekKey(),
-                    run.getWeek() == null ? null : run.getWeek().getLabel(),
                     run.getBoss().getId(),
                     run.getBoss().getName(),
                     run.getBoss().getIconKey(),

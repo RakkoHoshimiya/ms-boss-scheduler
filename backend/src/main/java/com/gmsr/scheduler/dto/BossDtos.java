@@ -29,6 +29,11 @@ public final class BossDtos {
             String tierLabel,
             /** 这个 BOSS 实际存在的难度（列表），排班页据此生成难度选项 */
             List<String> tiers,
+            /**
+             * 游戏里**实际存在**的难度（canonical 事实，来自 BossTierCatalog）。
+             * 前端据此禁用不存在的难度（如卡尔洛斯没有 Hard）；空列表表示未登记、不限制。
+             */
+            List<String> allowedTiers,
             int capacity,
             int sortOrder,
             boolean enabled,
@@ -39,8 +44,6 @@ public final class BossDtos {
             String comboName,
             /** 融合车固定难度 */
             String comboTier,
-            /** 是否按月刷新（如老黑能量车）：排班周期用 上月/本月/下月 */
-            boolean monthly,
             long runCount,
             int assignedCount) {
     }
