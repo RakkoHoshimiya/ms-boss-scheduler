@@ -353,7 +353,7 @@ export default function BossSchedulePage() {
    *
    * 为什么必须这样：融合车在数据层是「每个成员 BOSS 各一条 boss_run」，
    * 同一个角色在这 7 条车次上各有**自己独立的 run_member 行**（memberId 完全不同，
-   * 例如群友F/剑豪在 7 条上是 319/323/327/331/335/339/343）。
+   * 例如群友G/剑豪在 7 条上是 319/323/327/331/335/339/343）。
    * 后端 RunController 又是按 memberId 定位席位的 —— 所以绝不能拿同一个 memberId
    * 去循环操作多个 runId（第 2 次起必然失败）。
    */

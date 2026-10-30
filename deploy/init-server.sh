@@ -21,15 +21,15 @@ if ! command -v mvn >/dev/null; then
 fi
 
 echo "==> 2. 创建 PostgreSQL 数据库与账号"
-docker exec "$PG_CONTAINER" psql -U <数据库账号> -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='gmsr_app'" \
-  | grep -q 1 || docker exec "$PG_CONTAINER" psql -U <数据库账号> -d postgres \
+docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='gmsr_app'" \
+  | grep -q 1 || docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres \
       -c "CREATE ROLE gmsr_app LOGIN PASSWORD 'CHANGE_ME_DB_PASSWORD';"
-docker exec "$PG_CONTAINER" psql -U <数据库账号> -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='gmsr'" \
-  | grep -q 1 || docker exec "$PG_CONTAINER" psql -U <数据库账号> -d postgres \
+docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='gmsr'" \
+  | grep -q 1 || docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres \
       -c "CREATE DATABASE gmsr OWNER gmsr_app ENCODING 'UTF8' TEMPLATE template0;"
-docker exec "$PG_CONTAINER" psql -U <数据库账号> -d gmsr \
+docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d gmsr \
   -c "CREATE SCHEMA IF NOT EXISTS gmsr AUTHORIZATION gmsr_app;"
-docker exec "$PG_CONTAINER" psql -U <数据库账号> -d gmsr \
+docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d gmsr \
   -c "ALTER ROLE gmsr_app SET search_path = gmsr, public;"
 
 echo "==> 3. 创建运行账号与目录"

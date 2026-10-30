@@ -1,34 +1,34 @@
-# 敏感信息
-deploy/gmsr.env
-*.env
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.crt
-*.p12
-*.jks
-*.keystore
-.deploy/
-id_rsa*
-id_ed25519*
-known_hosts
-askpass.sh
+# ============================================================
+# 敏感信息 —— 绝对不能提交
+# ============================================================
 
+# SSH 私钥 / 明文密码 / 加密凭据
+.deploy/id_ed25519
+.deploy/id_ed25519.pub
+.deploy/askpass.sh
+.deploy/rc.sh
+.deploy/known_hosts
+加密口令.txt
+服务器信息.md.enc
+解密.sh
+
+# 后端配置里含数据库、Redis、默认管理员密码
+# 需要改配置时用环境变量覆盖（见服务器上的 /opt/gmsr/gmsr.env）
+gmsr/backend/src/main/resources/application.yml
+
+# ============================================================
 # 依赖与构建产物
+# ============================================================
 .tools/
 node_modules/
 dist/
 target/
 *.jar
-*.war
 *.log
-*.tsbuildinfo
-.backup/
-*.dump
 
+# ============================================================
 # 编辑器与系统文件
+# ============================================================
 .DS_Store
 Thumbs.db
 *.swp
@@ -36,3 +36,7 @@ Thumbs.db
 .vscode/
 *.tmp
 .cache/
+
+# 数据库/代码备份（含真实数据，不入库）
+.backup/
+*.dump

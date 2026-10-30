@@ -123,7 +123,10 @@ export default function RunsTablePage() {
     <div>
       <div className="page-head">
         <h1>车次一览表</h1>
-        <span className="sub">按 BOSS 汇总，方便查阅；车上成员可以标记自己车的攻坚状态</span>
+        <span className="sub">
+          按 BOSS 汇总，方便查阅；车上成员可以标记自己车的攻坚状态
+          <span className="muted"> · 完成状态每周四 08:00 自动重置为「未完成」</span>
+        </span>
       </div>
 
       <div className={`toolbar${isMobile ? ' toolbar-sticky' : ''}`}>

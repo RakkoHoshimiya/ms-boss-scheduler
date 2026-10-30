@@ -52,9 +52,7 @@ public class DataMigrator implements ApplicationRunner {
 
     /**
      * 一次性历史迁移数据：QQ 号 -> 群友昵称。
-     *
-     * 开源版本里是**示例值**（真实 QQ 与昵称已移除）。
-     * 迁移执行一次即被 marker 标记；换环境时把下面几行换成自己的数据。
+     * 开源版本里是**示例值**；换环境时替换成自己的数据即可。
      */
     private static final Map<String, String> QQ_TO_NAME = new LinkedHashMap<>();
 
@@ -176,7 +174,7 @@ public class DataMigrator implements ApplicationRunner {
     /** 按游戏规则需要限制为 3 人的 BOSS */
     private static final List<String> THREE_MAN_BOSSES = List.of("猴", "凶星", "灿烂的凶星", "林波");
     /** 已退出群友，直接删除 */
-    private static final List<String> REMOVED_PLAYERS = List.of("群友K", "群友Z", "群友W");
+    private static final List<String> REMOVED_PLAYERS = List.of("扯", "群友Z", "群友W");
     private static final String ACCOUNT_MARKER = "qq-accounts-v3";
     private static final String BOSS_ICON_MARKER = "boss-icons-v2";
     private static final String BOSS_NAME_MARKER = "boss-names-v2";
