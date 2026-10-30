@@ -86,4 +86,24 @@ class WeeklyStatusResetServiceTest {
         java.time.ZonedDateTime next2 = cron.next(at(11, 5, 8, 1));
         assertEquals(at(11, 12, 8, 0).toInstant(), next2.toInstant());
     }
+    @Test
+    @DisplayName("下次重置：周五 → 下周四 08:00")
+    void nextFromFriday() {
+        assertEquals(at(11, 5, 8, 0).toInstant(),
+                WeeklyStatusResetService.nextScheduledInstant(at(10, 30, 19, 0)));
+    }
+
+    @Test
+    @DisplayName("下次重置：周四 07:59 → 当天 08:00（还没到）")
+    void nextBeforeEight() {
+        assertEquals(at(10, 29, 8, 0).toInstant(),
+                WeeklyStatusResetService.nextScheduledInstant(at(10, 29, 7, 59)));
+    }
+
+    @Test
+    @DisplayName("下次重置：周四 08:00 整 → 下一周（这一刻已经在重置）")
+    void nextExactlyEight() {
+        assertEquals(at(11, 5, 8, 0).toInstant(),
+                WeeklyStatusResetService.nextScheduledInstant(at(10, 29, 8, 0)));
+    }
 }

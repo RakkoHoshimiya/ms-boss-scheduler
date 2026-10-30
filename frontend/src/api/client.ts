@@ -261,6 +261,8 @@ export const api = {
   deleteBoss: (id: number) => request<void>(`/bosses/${id}`, { method: 'DELETE' }),
 
   runs: () => request<RunView[]>('/runs'),
+  /** 完成状态的重置时间（上次 / 下次） */
+  statusReset: () => request<{ lastResetAt?: string | null; nextResetAt?: string }>('/status-reset'),
   createRun: (body: {
     bossId: number;
     tier?: string;

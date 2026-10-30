@@ -21,6 +21,8 @@ export default function RunsTablePage() {
   const [bossFilter, setBossFilter] = useState('');
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(true);
+  /** 完成状态的重置时间（上次 / 下次），用于顶部说明 */
+  const [resetInfo, setResetInfo] = useState<{ lastResetAt?: string | null; nextResetAt?: string } | null>(null);
   const [myRunIds, setMyRunIds] = useState<number[]>([]);
   const load = () => {
     setLoading(true);
@@ -35,6 +37,7 @@ export default function RunsTablePage() {
 
   useEffect(() => {
     load();
+    api.statusReset().then(setResetInfo).catch(() => setResetInfo(null));
   }, []);
 
   useEffect(() => {
@@ -125,7 +128,10 @@ export default function RunsTablePage() {
         <h1>车次一览表</h1>
         <span className="sub">
           按 BOSS 汇总，方便查阅；车上成员可以标记自己车的攻坚状态
-          <span className="muted"> · 完成状态每周四 08:00 自动重置为「未完成」</span>
+          <span className="muted">
+            {' '}· 完成状态每周四 08:00 自动重置为「未完成」
+            {resetInfo?.lastResetAt ? `（上次：${fmtResetTime(resetInfo.lastResetAt)}）` : ''}
+          </span>
         </span>
       </div>
 
@@ -326,4 +332,18 @@ export default function RunsTablePage() {
   );
 }
 
-
+/** 把 ISO 时间显示成「MM-DD HH:mm」（东八区，和游戏刷新时间一致）。 */
+function fmtResetTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}

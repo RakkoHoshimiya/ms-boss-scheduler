@@ -108,6 +108,28 @@ public class WeeklyStatusResetService {
         return changed;
     }
 
+    /** 上次重置的时间点（没有记录时返回 null）。 */
+    public Instant lastResetAt() {
+        return readMarker();
+    }
+
+    /** 下一次会自动重置的时间点。 */
+    public Instant nextResetAt() {
+        return nextScheduledInstant(ZonedDateTime.now(ZONE));
+    }
+
+    /** 下一次「周四 08:00」；如果现在正好是这个时刻（或已过），取下一周。 */
+    static Instant nextScheduledInstant(ZonedDateTime now) {
+        ZonedDateTime candidate = now.toLocalDate()
+                .with(TemporalAdjusters.nextOrSame(RESET_DAY))
+                .atTime(RESET_TIME)
+                .atZone(now.getZone());
+        if (!candidate.isAfter(now)) {
+            candidate = candidate.plusWeeks(1);
+        }
+        return candidate.toInstant();
+    }
+
     /** 最近一次「周四 08:00」的时间点；如果今天就是周四但还没到 8 点，则取上周四。 */
     static Instant lastScheduledInstant(ZonedDateTime now) {
         ZonedDateTime candidate = now.toLocalDate()
