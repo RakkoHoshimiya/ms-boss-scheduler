@@ -138,9 +138,54 @@ public class RunService {
         return assemble(runs);
     }
 
+    /**
+     * 复制一趟车到同一 BOSS 下的新序号。
+     *
+     * 为什么放在 service 里：以前是控制器先 create 再逐个 addMember，
+     * 每次调用各自提交 —— 中途某个成员失败时，新车次和已复制的部分成员会留在库里，
+     * 重试还会多出几趟车。现在整个过程在一个事务里，要么全成要么全不成。
+     */
+    @Transactional
+    public RunView copyRun(Long sourceId) {
+        // 锁住源车次，避免复制过程中源阵容被并发改动
+        runRepository.findByIdForUpdate(sourceId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + sourceId));
+        RunView source = get(sourceId);
+        Boss boss = bossRepository.findById(source.bossId())
+                .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + source.bossId()));
+        BossTier tier = BossTier.valueOf(source.tier());
+
+        BossRun run = new BossRun();
+        run.setBoss(boss);
+        run.setTier(tier);
+        run.setRunIndex(nextRunIndex(boss, tier));
+        run.setScheduled(source.scheduled());
+        run.setStatus(BossRun.Status.PLANNED);
+        run.setNote(source.note());
+        runRepository.save(run);
+
+        for (MemberView member : source.members()) {
+            GameCharacter character = characterRepository.findById(member.characterId())
+                    .orElseThrow(() -> new NotFoundException("角色不存在：" + member.characterId()));
+            ensureSingleCharacterPerPlayer(run.getId(), character.getId(), null);
+            RunMember copy = new RunMember();
+            copy.setRun(run);
+            copy.setCharacter(character);
+            copy.setSlotNo(member.slotNo());
+            copy.setRole(RunMember.Role.valueOf(member.role()));
+            copy.setStatus(RunMember.Status.valueOf(member.status()));
+            copy.setNote(member.note());
+            memberRepository.save(copy);
+        }
+        memberRepository.flush();
+        return get(run.getId());
+    }
+
     @Transactional
     public RunView addMember(Long runId, MemberRequest request) {
-        BossRun run = runRepository.findById(runId).orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
+        // 加行锁：后面的「是否已在车上 / 是否满员」都是先查后写，没锁并发会超员
+        BossRun run = runRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
         GameCharacter character = characterRepository.findById(request.characterId())
                 .orElseThrow(() -> new NotFoundException("角色不存在：" + request.characterId()));
         memberRepository.findByRunIdAndCharacterId(runId, character.getId()).ifPresent(existing -> {
@@ -235,6 +280,10 @@ public class RunService {
         if (source.getId().equals(targetRunId)) {
             throw new BusinessException("已经在这趟车上了，不用拖动");
         }
+        // 同时锁住源车次与目标车次（按 id 升序拿锁，避免两个方向相反的请求互相死锁）
+        Long lowId = Math.min(source.getId(), targetRunId);
+        Long highId = Math.max(source.getId(), targetRunId);
+        runRepository.findAllByIdForUpdate(List.of(lowId, highId));
         BossRun target = runRepository.findById(targetRunId)
                 .orElseThrow(() -> new NotFoundException("目标车次不存在：" + targetRunId));
 
@@ -283,6 +332,9 @@ public class RunService {
         if (runA.getId().equals(runB.getId())) {
             throw new BusinessException("两个角色已经在同一趟车上，不用换位");
         }
+        // 换位会同时改两趟车，锁住它们（按 id 升序，避免与反向请求死锁）
+        runRepository.findAllByIdForUpdate(
+                List.of(Math.min(runA.getId(), runB.getId()), Math.max(runA.getId(), runB.getId())));
         // 必须是同一个 BOSS 的车次才允许换位（不同 BOSS 之间没有「不能同时上」的约束）
         if (!runA.getBoss().getId().equals(runB.getBoss().getId())) {
             throw new BusinessException("只能在同一 BOSS 的车次之间换位");
@@ -364,7 +416,9 @@ public class RunService {
     /** 整队保存：用给定角色列表替换这趟车的全部席位。 */
     @Transactional
     public RunView replaceMembers(Long runId, List<MemberRequest> requests) {
-        BossRun run = runRepository.findById(runId).orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
+        // 整队保存会先删后建，同样要锁车次，避免与「拖人上车」并发时互相覆盖
+        BossRun run = runRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
         int capacity = run.getBoss().getCapacity();
         if (requests != null && requests.size() > capacity) {
             throw new BusinessException("这趟车最多 " + capacity + " 人，当前提交 " + requests.size() + " 人");

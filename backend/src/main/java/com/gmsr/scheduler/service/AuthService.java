@@ -209,12 +209,22 @@ public class AuthService {
             user.getPlayer().setNickname(user.getDisplayName());
             playerRepository.save(user.getPlayer());
         }
+        boolean passwordChanged = false;
         if (request.password() != null && !request.password().isBlank()) {
             validatePassword(request.password());
             user.setPasswordHash(passwordEncoder.encode(request.password()));
+            // 管理员直接改密码 = 一次重置：语义与 createUser / resetPassword 对齐，
+            // 本人下次登录必须先自己设新密码，否则管理员知道的那串密码会一直有效
+            user.setMustChangePassword(true);
+            passwordChanged = true;
         }
         applyPlayer(user, request.playerId());
         userRepository.save(user);
+        if (passwordChanged) {
+            // 改密码必须吊销已有会话，否则旧 access/refresh token 仍能用
+            // （以前只有「重置密码」那条路径做了，编辑接口漏了）
+            kickOut(id);
+        }
         return toView(user);
     }
 

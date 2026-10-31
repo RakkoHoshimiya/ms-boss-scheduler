@@ -34,6 +34,19 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 
 export const CHANGE_LOG: ChangeGroup[] = [
   {
+    date: '10/31',
+    title: '服务端安全与并发加固',
+    entries: [
+      { type: 'security', text: '明文 HTTP（8080）不再接受任何 API 请求（含登录），返回 403；页面仍会 301 跳到 HTTPS，根证书下载与安装说明保留 HTTP 入口' },
+      { type: 'security', text: '「首次登录必须改密」改为**服务端强制**：待改密账号只能查自己、改密码、登出，其余接口一律 403（以前只靠前端弹窗，可以被绕开）' },
+      { type: 'security', text: 'refresh token 改为原子消费（Redis GETDEL），并发刷新只有一次能成功，重放立即失效' },
+      { type: 'security', text: '管理员在「编辑账号」里改密码后，会同时撤销该账号已有会话；旧 access / refresh token 立即失效' },
+      { type: 'fix', text: '上人 / 挪人 / 换位 / 整队保存改为对车次加行锁，避免并发时超员或同一群友占两个席位' },
+      { type: 'fix', text: '复制车次改为单事务，中途失败不会留下「半截车次」' },
+      { type: 'fix', text: '每周重置改为显式事务 + 分布式锁，避免「改了状态没写标记」导致重复重置，也为多实例部署留好互斥' },
+    ],
+  },
+  {
     date: '10/30',
     title: '完成状态每周自动重置',
     entries: [

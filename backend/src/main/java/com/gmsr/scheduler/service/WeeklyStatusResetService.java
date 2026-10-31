@@ -5,6 +5,7 @@ import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.repository.AppSettingRepository;
 import com.gmsr.scheduler.repository.BossRunRepository;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -15,9 +16,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 每周四 08:00 把所有车次的状态改回「未完成」。
@@ -47,10 +49,28 @@ public class WeeklyStatusResetService {
 
     private final BossRunRepository runRepository;
     private final AppSettingRepository settingRepository;
+    /**
+     * 用编程式事务而不是 @Transactional：
+     * 定时任务和启动补跑都是**同一个对象内部**调 resetIfDue()，
+     * 走不到 Spring 的事务代理，@Transactional 会静默失效 ——
+     * 于是「改状态」和「写重置标记」不在一个事务里，
+     * 万一改完状态、写标记失败，下次补跑会再重置一次，把期间用户新标的完成状态抹掉。
+     */
+    private final TransactionTemplate transactionTemplate;
+    /** 多实例互斥：同一时刻只让一个实例执行重置 */
+    private final StringRedisTemplate redis;
 
-    public WeeklyStatusResetService(BossRunRepository runRepository, AppSettingRepository settingRepository) {
+    private static final String LOCK_KEY = "gmsr:lock:status-reset";
+    private static final Duration LOCK_TTL = Duration.ofMinutes(5);
+
+    public WeeklyStatusResetService(BossRunRepository runRepository,
+                                    AppSettingRepository settingRepository,
+                                    TransactionTemplate transactionTemplate,
+                                    StringRedisTemplate redis) {
         this.runRepository = runRepository;
         this.settingRepository = settingRepository;
+        this.transactionTemplate = transactionTemplate;
+        this.redis = redis;
     }
 
     /** 每周四 08:00 触发。 */
@@ -75,12 +95,43 @@ public class WeeklyStatusResetService {
     }
 
     /**
-     * 到点了就重置。
+     * 到点了就重置。整个「判断 + 改状态 + 写标记」在一个事务里，并加分布式锁。
      *
      * @return 本次重置了多少趟车（0 表示这次不需要重置）
      */
-    @Transactional
     public int resetIfDue() {
+        if (!tryLock()) {
+            log.info("状态重置：另一个实例正在执行，本次跳过");
+            return 0;
+        }
+        try {
+            Integer changed = transactionTemplate.execute(status -> doResetIfDue());
+            return changed == null ? 0 : changed;
+        } finally {
+            unlock();
+        }
+    }
+
+    /** 手动重置（管理员用，也方便验证）。 */
+    public int resetNow() {
+        if (!tryLock()) {
+            throw new BusinessException("另一个实例正在执行重置，请稍后重试");
+        }
+        try {
+            Integer changed = transactionTemplate.execute(status -> {
+                int count = doReset();
+                saveMarker(Instant.now());
+                log.info("状态重置：管理员手动重置，{} 趟车次改回「未完成」", count);
+                return count;
+            });
+            return changed == null ? 0 : changed;
+        } finally {
+            unlock();
+        }
+    }
+
+    /** 事务内：判断是否到点，到点则重置并写标记。 */
+    private int doResetIfDue() {
         Instant due = lastScheduledInstant(ZonedDateTime.now(ZONE));
         Instant last = readMarker();
 
@@ -99,13 +150,25 @@ public class WeeklyStatusResetService {
         return changed;
     }
 
-    /** 手动重置（管理员用，也方便验证）。 */
-    @Transactional
-    public int resetNow() {
-        int changed = doReset();
-        saveMarker(Instant.now());
-        log.info("状态重置：管理员手动重置，{} 趟车次改回「未完成」", changed);
-        return changed;
+    /**
+     * 抢锁。Redis 不可用时按「单实例」继续执行 ——
+     * 宁可重复重置（结果仍是全部未完成，无副作用），也不要因为 Redis 抖动漏掉每周重置。
+     */
+    private boolean tryLock() {
+        try {
+            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(LOCK_KEY, "1", LOCK_TTL));
+        } catch (Exception ex) {
+            log.warn("获取重置锁失败（按单实例继续）：{}", ex.getMessage());
+            return true;
+        }
+    }
+
+    private void unlock() {
+        try {
+            redis.delete(LOCK_KEY);
+        } catch (Exception ignored) {
+            // 锁带 TTL，删不掉也会自动过期
+        }
     }
 
     /** 上次重置的时间点（没有记录时返回 null）。 */

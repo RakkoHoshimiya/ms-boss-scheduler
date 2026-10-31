@@ -227,7 +227,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         ) : null}
-        <main className="page">{children}</main>
+        {/*
+          待改密时**不渲染页面内容**。
+          服务端现在会拦截待改密账号的其它接口（403 MUST_CHANGE_PASSWORD），
+          如果照常挂载页面，它们会并发发一堆请求、弹一堆错误提示。
+          这里直接不渲染，用户只看到改密弹窗。
+        */}
+        <main className="page">{forcePassword ? null : children}</main>
       </div>
     </div>
   );

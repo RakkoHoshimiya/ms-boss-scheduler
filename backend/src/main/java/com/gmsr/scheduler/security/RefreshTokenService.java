@@ -83,11 +83,19 @@ public class RefreshTokenService {
             return null;
         }
         String tokenKey = TOKEN_PREFIX + refreshToken;
+        /**
+         * 原子地「取出并删除」。
+         *
+         * 以前是 get → delete → issue 三步：两个并发请求可能都读到同一个旧 token，
+         * 于是各自换到新令牌（一次性使用形同虚设），删失败还会被忽略。
+         * 现在用 Redis 的 GETDEL（6.2+，线上是 8.x）：**谁先执行谁拿到用户名，另一个直接拿不到**。
+         * 读失败也一律当作无效（fail closed），不再"看起来成功"。
+         */
         String userId;
         try {
-            userId = redis.opsForValue().get(tokenKey);
+            userId = redis.opsForValue().getAndDelete(tokenKey);
         } catch (Exception ex) {
-            log.warn("读取 refresh token 失败：{}", ex.getMessage());
+            log.warn("消费 refresh token 失败（Redis 异常，按无效处理）：{}", ex.getMessage());
             return null;
         }
         if (userId == null) {
@@ -99,12 +107,11 @@ public class RefreshTokenService {
         } catch (NumberFormatException ex) {
             return null;
         }
-        // 一次性使用：旧 token 立刻作废，再发新的
+        // 顺手把它从账号的 token 集合里摘掉（失败只记日志：主键已删除，旧 token 已不可用）
         try {
-            redis.delete(tokenKey);
             redis.opsForSet().remove(USER_PREFIX + parsed, refreshToken);
-        } catch (Exception ignored) {
-            // 删不掉也不影响：新 token 已下发，旧 token 会在 TTL 到期后消失
+        } catch (Exception ex) {
+            log.warn("清理 refresh token 索引失败：{}", ex.getMessage());
         }
         newTokenOut[0] = issue(parsed);
         return parsed;

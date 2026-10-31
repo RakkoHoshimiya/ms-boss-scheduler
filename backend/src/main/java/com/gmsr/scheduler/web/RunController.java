@@ -141,25 +141,9 @@ public class RunController {
         return runService.playerRuns(playerId);
     }
 
-    /** 复制一趟车到同一 BOSS 下的新序号。 */
+    /** 复制一趟车到同一 BOSS 下的新序号（整体事务，见 RunService#copyRun）。 */
     @PostMapping("/runs/{id}/copy")
     public RunView copy(@PathVariable Long id) {
-        RunView source = runService.get(id);
-        RunView created = runService.create(new RunRequest(
-                source.bossId(),
-                source.tier(),
-                null,
-                source.scheduled(),
-                "PLANNED",
-                source.note()));
-        for (var member : source.members()) {
-            runService.addMember(created.id(), new MemberRequest(
-                    member.characterId(),
-                    member.slotNo(),
-                    member.role(),
-                    member.status(),
-                    member.note()));
-        }
-        return runService.get(created.id());
+        return runService.copyRun(id);
     }
 }
