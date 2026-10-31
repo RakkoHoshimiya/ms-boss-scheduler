@@ -82,6 +82,51 @@ jobs:
           path: backend/target/surefire-reports/
           if-no-files-found: ignore
 
+  ops:
+    name: 运维脚本与部署文件
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell 语法检查
+        run: |
+          set -euo pipefail
+          for f in deploy/*.sh; do
+            bash -n "$f" && echo "  ✓ $f"
+          done
+
+      - name: 必需部署文件是否齐全
+        run: |
+          set -euo pipefail
+          required=(
+            deploy/backup.sh
+            deploy/restore.sh
+            deploy/RESTORE.md
+            deploy/gmsr-backup.service
+            deploy/gmsr-backup.timer
+            deploy/gmsr.conf
+            deploy/livekit-rtc.inc
+            deploy/gmsr.env.example
+          )
+          missing=0
+          for f in "${required[@]}"; do
+            if [[ -f "$f" ]]; then echo "  ✓ $f"; else echo "  ✗ 缺少 $f"; missing=1; fi
+          done
+          exit $missing
+
+      - name: 备份/恢复脚本的关键护栏仍在
+        run: |
+          set -euo pipefail
+          # 备份：必需配置文件缺失时必须报错退出，不能静默打一个不完整的包
+          grep -q '缺少必需配置文件' deploy/backup.sh
+          # 恢复：默认拒绝覆盖已存在的库
+          grep -q '目标库 .* 已存在' deploy/restore.sh
+          # 恢复：先验证备份文件，再动数据库
+          grep -q 'pg_restore --list' deploy/restore.sh
+          # 恢复：覆盖生产前必须试恢复
+          grep -q '试恢复到临时库' deploy/restore.sh
+          echo '  ✓ 关键护栏都在'
+
   frontend:
     name: 前端（类型检查 + 构建）
     runs-on: ubuntu-latest

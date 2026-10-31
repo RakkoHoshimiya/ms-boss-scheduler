@@ -15,6 +15,27 @@
 
 ## 自动备份
 
+### 安装（新机器 / 整机重建时照这个做）
+
+```bash
+# 1) 脚本
+mkdir -p /opt/gmsr/bin
+install -m 755 deploy/backup.sh deploy/restore.sh /opt/gmsr/bin/
+
+# 2) 定时任务
+install -m 644 deploy/gmsr-backup.service deploy/gmsr-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now gmsr-backup.timer
+
+# 3) 立刻验证一次
+systemctl start gmsr-backup.service
+journalctl -u gmsr-backup.service -n 20 --no-pager
+```
+
+两个单元文件都在仓库 `deploy/` 里，服务与定时器内容见文件本身。
+
+### 运行
+
 `deploy/backup.sh` 由 systemd timer 每天 04:00 执行：
 
 ```bash
@@ -59,6 +80,19 @@ BACKUP_DIR=/mnt/nas/backup KEEP_DAYS=30 /opt/gmsr/bin/backup.sh
 | 备份只含数据库，缺配置 | `backup.sh` 同时打包 `gmsr.env` / nginx / systemd |
 | 备份没有完整性校验 | 导出后立即 `pg_restore --list` 校验，失败即报错 |
 | 恢复没有防误操作 | `restore.sh` 默认拒绝覆盖生产库，需显式 `--force`，且会先自救备份 |
+
+### 恢复脚本的安全护栏（2026-10-31 加固）
+
+恢复会**删除并重建**目标库，所以脚本刻意保守：
+
+| 情况 | 行为 |
+| --- | --- |
+| 备份文件损坏 / 不是本项目的备份 | **在动任何数据库之前**就中止（`pg_restore --list` + 检查必需表） |
+| 目标库已存在（**任何**库，不只生产） | 拒绝，必须显式 `--force` |
+| 覆盖生产库 | 先自救备份当前库 → 再在临时库做一次试恢复并核对 → 成功后才动生产 |
+| 目标库不存在 | 直接恢复 |
+
+> 早期版本只保护名字等于 `gmsr` 的库，其他同名业务库会被无提示删除 —— 已修。
 
 ## 恢复步骤
 

@@ -1,0 +1,25 @@
+# GMSR 数据库每日备份
+#
+# 安装：
+#   cp deploy/gmsr-backup.service deploy/gmsr-backup.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now gmsr-backup.timer
+#
+# 验证：
+#   systemctl list-timers gmsr-backup.timer
+#   systemctl start gmsr-backup.service && journalctl -u gmsr-backup.service -n 20
+
+[Unit]
+Description=GMSR 数据库每日备份
+Documentation=https://github.com/群友MHoshimiya/ms-boss-scheduler/blob/main/deploy/RESTORE.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gmsr/bin/backup.sh
+Nice=10
+IOSchedulingClass=idle
+# 失败要能被 journalctl / 监控看到
+StandardOutput=journal
+StandardError=journal
