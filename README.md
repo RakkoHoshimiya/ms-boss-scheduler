@@ -430,6 +430,23 @@ GMSR_LOGIN_LOCK_MINUTES=15         # 锁定时长（分钟）
 ```
 
 
+## 备份与恢复
+
+每天 04:00 由 systemd timer 自动执行 `deploy/backup.sh`：
+
+| 内容 | 文件 | 说明 |
+| --- | --- | --- |
+| 数据库 | `gmsr-YYYYmmdd-HHMMSS.dump` | `pg_dump -Fc`，导出后立即 `pg_restore --list` 校验 |
+| 配置 | `gmsr-conf-*.tar.gz` | `gmsr.env`、nginx、systemd 单元、运维脚本（权限 600）|
+| 应用 | `gmsr-scheduler-latest.jar` | 覆盖式保留一份 |
+
+恢复用 `deploy/restore.sh`，**默认拒绝覆盖生产库**，演练请恢复到独立库：
+
+```bash
+/opt/gmsr/bin/restore.sh /root/backup/gmsr-<时间戳>.dump gmsr_drill
+```
+
+完整步骤、演练记录与已知限制见 **[deploy/RESTORE.md](deploy/RESTORE.md)**。
 ## 持续集成
 
 `.github/workflows/ci.yml` 在每次 push / PR 时跑两件事：

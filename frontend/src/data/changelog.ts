@@ -35,6 +35,15 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 export const CHANGE_LOG: ChangeGroup[] = [
   {
     date: '10/31',
+    title: '备份自动化 + 完成一次真实恢复演练',
+    entries: [
+      { type: 'feature', text: '每天 04:00 自动备份数据库并校验完整性，同时打包配置文件（gmsr.env / nginx / systemd），保留 14 天' },
+      { type: 'feature', text: '恢复脚本默认拒绝覆盖生产库，必须显式确认，且覆盖前会先自救备份一份' },
+      { type: 'fix', text: '演练中发现「只有数据库备份、没有配置备份」会导致恢复后服务起不来，已补上' },
+    ],
+  },
+  {
+    date: '10/31',
     title: '修复换位被数据库约束误拦（可延迟约束）',
     entries: [
       { type: 'fix', text: '换位恢复正常：座位号唯一和容量检查改为「提交时校验」，交换过程中的临时冲突不再被误判（之前满车换位会直接报错）' },
