@@ -35,6 +35,14 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 export const CHANGE_LOG: ChangeGroup[] = [
   {
     date: '10/31',
+    title: '修复换位被数据库约束误拦（可延迟约束）',
+    entries: [
+      { type: 'fix', text: '换位恢复正常：座位号唯一和容量检查改为「提交时校验」，交换过程中的临时冲突不再被误判（之前满车换位会直接报错）' },
+      { type: 'feature', text: '补上两个之前没被约束覆盖的入口：车次改绑到容量更小的 BOSS、角色改属主导致同人双角色，现在都会被拒绝' },
+    ],
+  },
+  {
+    date: '10/31',
     title: '数据库约束 / 版本化迁移 / 持续集成',
     entries: [
       { type: 'feature', text: '引入 Flyway 版本化迁移：结构变更一律走 db/migration，启动时不再自动改表（ddl-auto 改为 validate）' },

@@ -25,14 +25,18 @@ public class PlayerService {
     private final PlayerRepository playerRepository;
     private final AppUserRepository userRepository;
     private final GameCharacterRepository characterRepository;
+    /** 改角色属主时，要检查这个角色所在的每趟车里是否已有新属主的角色 */
+    private final com.gmsr.scheduler.repository.RunMemberRepository memberRepository;
 
     public PlayerService(
             PlayerRepository playerRepository,
             AppUserRepository userRepository,
-            GameCharacterRepository characterRepository) {
+            GameCharacterRepository characterRepository,
+            com.gmsr.scheduler.repository.RunMemberRepository memberRepository) {
         this.playerRepository = playerRepository;
         this.userRepository = userRepository;
         this.characterRepository = characterRepository;
+        this.memberRepository = memberRepository;
     }
 
     /**
@@ -226,6 +230,19 @@ public class PlayerService {
         if (!character.getPlayer().getId().equals(request.playerId())) {
             Player player = playerRepository.findById(request.playerId())
                     .orElseThrow(() -> new NotFoundException("群友不存在：" + request.playerId()));
+            // 改属主可能让「同一个群友在同一趟车里出现两个角色」，先给出友好提示
+            // （数据库触发器 trg_character_owner_change 是兜底）
+            for (var member : memberRepository.findByCharacterIdOrderByIdAsc(id)) {
+                boolean conflict = memberRepository
+                        .findByRunIdAndCharacterPlayerId(member.getRun().getId(), player.getId())
+                        .stream()
+                        .anyMatch(other -> !other.getId().equals(member.getId()));
+                if (conflict) {
+                    throw new BusinessException("不能改到「" + player.getNickname()
+                            + "」名下：车次「" + member.getRun().getBoss().getName()
+                            + "」里已经有他的另一个角色了");
+                }
+            }
             character.setPlayer(player);
         }
         ensureJobUnique(character.getPlayer(), request.job(), id);

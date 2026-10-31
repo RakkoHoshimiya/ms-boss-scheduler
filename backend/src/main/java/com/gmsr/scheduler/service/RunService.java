@@ -91,10 +91,18 @@ public class RunService {
 
     @Transactional
     public RunView update(Long id, RunRequest request) {
-        BossRun run = runRepository.findById(id).orElseThrow(() -> new NotFoundException("车次不存在：" + id));
+        // 加锁：改绑 BOSS 会改变允许的容量，必须和「加人」串行化
+        BossRun run = runRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + id));
         if (request.bossId() != null && !request.bossId().equals(run.getBoss().getId())) {
             Boss boss = bossRepository.findById(request.bossId())
                     .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
+            // 应用层先给出友好提示（数据库触发器 trg_run_rebind_capacity 是兜底）
+            long members = memberRepository.countByRunId(id);
+            if (members > boss.getCapacity()) {
+                throw new BusinessException("无法改到「" + boss.getName() + "」：它最多 "
+                        + boss.getCapacity() + " 人，这趟车已经有 " + members + " 个席位");
+            }
             run.setBoss(boss);
         }
         if (request.tier() != null) {
