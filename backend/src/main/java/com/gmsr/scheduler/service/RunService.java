@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,9 @@ public class RunService {
     private final RunMemberRepository memberRepository;
     private final BossRepository bossRepository;
     private final GameCharacterRepository characterRepository;
+    /** 用于 refresh：强制从数据库重读实体，绕过 JPA 一级缓存 */
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public RunService(
             BossRunRepository runRepository,
@@ -293,12 +298,14 @@ public class RunService {
          *   - 把席位从错误的源车次「算」出来，结果与用户看到的界面不符
          * 这里发现源车次变了就直接拒绝，让前端刷新重试。
          */
-        RunMember fresh = memberRepository.findById(memberId)
+        // 用标量查询读数据库当前值（findById 会命中一级缓存，读到的是旧车次）
+        Long currentRunId = memberRepository.findRunIdById(memberId)
                 .orElseThrow(() -> new NotFoundException("席位不存在：" + memberId));
-        if (!fresh.getRun().getId().equals(source.getId())) {
+        if (!currentRunId.equals(source.getId())) {
             throw new BusinessException("这个席位刚刚被挪到别的车次了，请刷新后重试");
         }
-        member = fresh;
+        // 确认后把实体状态同步成数据库最新（否则后面 save 会用旧快照覆盖其它字段）
+        entityManager.refresh(member);
         BossRun target = runRepository.findById(targetRunId)
                 .orElseThrow(() -> new NotFoundException("目标车次不存在：" + targetRunId));
 
@@ -354,15 +361,16 @@ public class RunService {
          * 拿到锁后重新读两个席位，确认它们仍在原来那两趟车上。
          * 否则并发下可能：a 已被挪到别的车次，而我们还在用它旧的 runA 做校验与交换。
          */
-        RunMember freshA = memberRepository.findById(memberId)
+        // 同样用标量查询，绕开一级缓存
+        Long runIdOfA = memberRepository.findRunIdById(memberId)
                 .orElseThrow(() -> new NotFoundException("席位不存在：" + memberId));
-        RunMember freshB = memberRepository.findById(otherMemberId)
+        Long runIdOfB = memberRepository.findRunIdById(otherMemberId)
                 .orElseThrow(() -> new NotFoundException("席位不存在：" + otherMemberId));
-        if (!freshA.getRun().getId().equals(runA.getId()) || !freshB.getRun().getId().equals(runB.getId())) {
+        if (!runIdOfA.equals(runA.getId()) || !runIdOfB.equals(runB.getId())) {
             throw new BusinessException("这两个席位刚刚有变动，请刷新后重试");
         }
-        a = freshA;
-        b = freshB;
+        entityManager.refresh(a);
+        entityManager.refresh(b);
         // 必须是同一个 BOSS 的车次才允许换位（不同 BOSS 之间没有「不能同时上」的约束）
         if (!runA.getBoss().getId().equals(runB.getBoss().getId())) {
             throw new BusinessException("只能在同一 BOSS 的车次之间换位");

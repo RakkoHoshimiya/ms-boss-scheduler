@@ -35,6 +35,15 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 export const CHANGE_LOG: ChangeGroup[] = [
   {
     date: '10/31',
+    title: '并发读取与会话版本（第三轮评审）',
+    entries: [
+      { type: 'fix', text: '移动 / 换位「加锁后重新读取」改用标量查询：原来用 findById，会命中 JPA 一级缓存返回旧实体，等于没重新读（已用真实 PostgreSQL 双事务测试证明）' },
+      { type: 'security', text: '登录也锁账号行，与改密/重置串行化，避免「旧密码刚校验通过、改密已撤销、登录又签出 access token」' },
+      { type: 'security', text: 'access token 增加会话版本校验：改密后旧 token 在下一次请求就失效，不必等 2 小时过期' },
+    ],
+  },
+  {
+    date: '10/31',
     title: '并发与令牌边界加固（第二轮评审）',
     entries: [
       { type: 'security', text: '刷新与改密撤销通过「会话版本」协调：refresh token 里带签发时的版本号，刷新时锁账号行比对，版本不符直接拒绝——杜绝「刷新先消费、撤销后执行、刷新又签出新会话」' },

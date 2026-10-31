@@ -12,6 +12,11 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     Optional<AppUser> findByUsername(String username);
 
+    /** 登录时用：锁住账号行，避免「校验旧密码」与「改密撤销」交错。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from AppUser u where u.username = :username")
+    Optional<AppUser> findByUsernameForUpdate(@Param("username") String username);
+
     /** 通过绑定的群友找账号（改群友名时要同步账号显示名）。 */
     Optional<AppUser> findByPlayerId(Long playerId);
 

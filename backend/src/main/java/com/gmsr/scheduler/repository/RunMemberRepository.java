@@ -22,6 +22,18 @@ public interface RunMemberRepository extends JpaRepository<RunMember, Long> {
 
     Optional<RunMember> findByRunIdAndCharacterId(Long runId, Long characterId);
 
+    /**
+     * 只查「这个席位现在在哪趟车上」。
+     *
+     * 为什么不用 findById().getRun().getId()：
+     * JPA 的持久化上下文（一级缓存）会把同一个事务里第一次读到的实体缓存起来，
+     * 后续 findById 直接返回缓存实例、**不会重新查库** ——
+     * 于是「加锁后重新读取」等于没读，另一个事务在此期间把席位挪走也发现不了。
+     * 标量投影查询会真的执行 SQL，能拿到数据库当前值。
+     */
+    @Query("select m.run.id from RunMember m where m.id = :id")
+    Optional<Long> findRunIdById(@Param("id") Long id);
+
     /** 这趟车上某个群友（玩家）已经上了哪些角色 —— 用于「同一趟车只能上一个自己的角色」。 */
     @EntityGraph(attributePaths = {"character", "character.player"})
     List<RunMember> findByRunIdAndCharacterPlayerId(Long runId, Long playerId);

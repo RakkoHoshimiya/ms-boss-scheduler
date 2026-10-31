@@ -26,6 +26,9 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
+    /** SA-Token 会话里存「会话版本」的键；过滤器会用它校验 access token 是否已因改密失效 */
+    public static final String SESSION_VERSION_KEY = "sessionVersion";
+
     private final AppUserRepository userRepository;
     private final PlayerRepository playerRepository;
     private final PasswordEncoder passwordEncoder;
@@ -53,14 +56,16 @@ public class AuthService {
         this.accessTokenSeconds = accessTokenSeconds;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public LoginResponse login(LoginRequest request, String clientIp) {
         String username = request.username() == null ? "" : request.username().trim();
         long lockedMinutes = loginAttemptService.lockedMinutes(username, clientIp);
         if (lockedMinutes > 0) {
             throw new BusinessException("登录失败次数过多，请 " + lockedMinutes + " 分钟后再试");
         }
-        AppUser user = userRepository.findByUsername(username).orElse(null);
+        // 加行锁：与「改密 / 重置 / 禁用」串行化。
+        // 否则可能：校验旧密码通过 → 管理员改密并撤销 → 这里继续签发 access token（撤销被绕过）
+        AppUser user = userRepository.findByUsernameForUpdate(username).orElse(null);
         if (user == null || !user.isEnabled() || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             loginAttemptService.recordFailure(username, clientIp);
             // 不区分「用户不存在 / 密码错误 / 账号禁用」，避免暴露账号是否存在
@@ -69,6 +74,8 @@ public class AuthService {
         loginAttemptService.recordSuccess(username, clientIp);
         // SA-Token 建立服务端会话：access token 2 小时，刷新由 refresh token 负责
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
+        // 会话里记下当前版本，过滤器每次请求都会拿它和数据库比对
+        cn.dev33.satoken.stp.StpUtil.getSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
         String accessToken = cn.dev33.satoken.stp.StpUtil.getTokenValue();
         String refreshToken = refreshTokenService.issue(user.getId(), user.getSessionVersion());
         return new LoginResponse(
@@ -133,6 +140,7 @@ public class AuthService {
             throw new BusinessException("登录已失效，请重新登录");
         }
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
+        cn.dev33.satoken.stp.StpUtil.getSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
         return new LoginResponse(
                 cn.dev33.satoken.stp.StpUtil.getTokenValue(),
                 refreshTokenService.issue(user.getId(), user.getSessionVersion()),

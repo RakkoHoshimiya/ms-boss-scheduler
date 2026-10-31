@@ -130,6 +130,27 @@ public class SaTokenAuthFilter extends OncePerRequestFilter {
             StpUtil.logout(userId);
             return;
         }
+        /**
+         * 会话版本校验：改密 / 重置 / 禁用会把账号的 sessionVersion +1，
+         * 而 access token 对应的会话里存着签发时的版本。
+         * 两者不一致 → 这个 access token 是撤销之前签的，立即作废。
+         *
+         * 这一层是「登录签发」之外的兜底：即使某条路径在撤销后仍签出了 access token，
+         * 它也会在第一次请求时被这里挡下，不需要等到 2 小时过期。
+         * 没有版本信息的旧会话按 0 处理（未改过密码的账号版本也是 0，不受影响）。
+         */
+        long sessionVersion;
+        try {
+            Object stored = StpUtil.getSessionByLoginId(userId, false)
+                    .get(com.gmsr.scheduler.service.AuthService.SESSION_VERSION_KEY);
+            sessionVersion = stored == null ? 0L : Long.parseLong(String.valueOf(stored));
+        } catch (Exception ex) {
+            sessionVersion = 0L;
+        }
+        if (sessionVersion != user.getSessionVersion()) {
+            StpUtil.logout(userId);
+            return;
+        }
 
         String role = user.getRole().name();
         boolean canSchedule = "ADMIN".equals(role) || user.isCanSchedule();
