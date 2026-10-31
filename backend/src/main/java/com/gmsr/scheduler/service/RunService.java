@@ -207,7 +207,8 @@ public class RunService {
         RunMember member = new RunMember();
         member.setRun(run);
         member.setCharacter(character);
-        member.setSlotNo(request.slotNo() == null ? (int) current + 1 : request.slotNo());
+        // 座位号取「当前最大值 + 1」，不能用人数 + 1（删过人后会与已有座位号重复）
+        member.setSlotNo(request.slotNo() == null ? nextSlotNo(runId) : request.slotNo());
         member.setRole(request.role() == null ? RunMember.Role.MEMBER : RunMember.Role.valueOf(request.role()));
         member.setStatus(request.status() == null
                 ? RunMember.Status.CONFIRMED
@@ -242,6 +243,12 @@ public class RunService {
         Long runId = member.getRun().getId();
         memberRepository.delete(member);
         return get(runId);
+    }
+
+    /** 下一个可用座位号（当前最大值 + 1）。 */
+    private int nextSlotNo(Long runId) {
+        Integer max = memberRepository.findMaxSlotNo(runId);
+        return max == null ? 1 : max + 1;
     }
 
     /** 有编辑权限的人（管理员/编辑）或这趟车上的群友本人，都算可以动这趟车。 */
@@ -323,7 +330,7 @@ public class RunService {
         }
 
         member.setRun(target);
-        member.setSlotNo(slotNo == null ? (int) targetCount + 1 : slotNo);
+        member.setSlotNo(slotNo == null ? nextSlotNo(target.getId()) : slotNo);
         memberRepository.save(member);
         memberRepository.flush();
 
@@ -477,6 +484,9 @@ public class RunService {
             }
         }
         memberRepository.deleteAll(memberRepository.findByRunIdOrderBySlotNoAscIdAsc(runId));
+        // 必须立刻 flush：Hibernate 的刷写顺序是「先 insert 后 delete」，
+        // 不 flush 的话新席位会先插入，数据库触发器看到旧席位还在，会误判超员。
+        memberRepository.flush();
         if (requests != null) {
             Set<Long> seen = new LinkedHashSet<>();
             int slot = 0;

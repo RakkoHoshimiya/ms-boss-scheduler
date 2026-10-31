@@ -35,6 +35,17 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 export const CHANGE_LOG: ChangeGroup[] = [
   {
     date: '10/31',
+    title: '数据库约束 / 版本化迁移 / 持续集成',
+    entries: [
+      { type: 'feature', text: '引入 Flyway 版本化迁移：结构变更一律走 db/migration，启动时不再自动改表（ddl-auto 改为 validate）' },
+      { type: 'security', text: '两条排班不变量下沉到数据库：一趟车不能超员、同一趟车一个群友只能有一个角色（即使绕过页面直接改库也会被拒绝）' },
+      { type: 'fix', text: '座位号改为「当前最大值 +1」分配，修掉删过人之后座位号重复的问题（存量数据已就地重排为 1..n 连续）' },
+      { type: 'fix', text: '整队保存改为删除后立即 flush，避免新席位先插入、被数据库误判超员' },
+      { type: 'feature', text: 'GitHub Actions 持续集成：PG + Redis 上跑真实库测试（含并发用例）与前端构建' },
+    ],
+  },
+  {
+    date: '10/31',
     title: '并发读取与会话版本（第三轮评审）',
     entries: [
       { type: 'fix', text: '移动 / 换位「加锁后重新读取」改用标量查询：原来用 findById，会命中 JPA 一级缓存返回旧实体，等于没重新读（已用真实 PostgreSQL 双事务测试证明）' },

@@ -31,6 +31,14 @@ public interface RunMemberRepository extends JpaRepository<RunMember, Long> {
      * 于是「加锁后重新读取」等于没读，另一个事务在此期间把席位挪走也发现不了。
      * 标量投影查询会真的执行 SQL，能拿到数据库当前值。
      */
+    /**
+     * 这趟车当前最大的座位号（没有席位时返回 null）。
+     * 上人时应该用 max+1，而不是「人数+1」—— 中间删过人以后，
+     * 人数+1 会和已有座位号撞车（历史上出现过 6 处重复）。
+     */
+    @Query("select max(m.slotNo) from RunMember m where m.run.id = :runId")
+    Integer findMaxSlotNo(@Param("runId") Long runId);
+
     @Query("select m.run.id from RunMember m where m.id = :id")
     Optional<Long> findRunIdById(@Param("id") Long id);
 

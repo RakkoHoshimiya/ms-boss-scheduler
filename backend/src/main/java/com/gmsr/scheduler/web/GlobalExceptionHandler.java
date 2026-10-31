@@ -82,6 +82,20 @@ public class GlobalExceptionHandler {
                 .body(new ApiError("STORAGE_UNAVAILABLE", "会话服务暂时不可用，请稍后重试"));
     }
 
+    /**
+     * 数据库约束被触发（容量、同一群友单角色、唯一键等）。
+     * 这些是**用户可理解的业务规则**，不该报成 500；把约束里的提示原样带出来。
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleConstraint(org.springframework.dao.DataIntegrityViolationException ex) {
+        Throwable cause = ex.getMostSpecificCause();
+        String raw = cause == null ? ex.getMessage() : cause.getMessage();
+        String message = raw == null ? "数据不满足约束" : raw.split("\n")[0];
+        log.warn("数据约束拒绝写入：{}", message);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ApiError("CONSTRAINT_VIOLATION", message));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleOthers(Exception ex) {
         log.error("未处理异常", ex);
