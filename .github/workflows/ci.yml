@@ -42,6 +42,8 @@ jobs:
     env:
       # 打开集成测试开关：空库上由 Flyway 建结构，测试自建数据
       GMSR_INTEGRATION_DB: '1'
+      # 打开 Redis 集成测试（refresh token 并发消费、故障降级）
+      GMSR_INTEGRATION_REDIS: '1'
       SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/gmsr?currentSchema=gmsr
       SPRING_DATASOURCE_USERNAME: gmsr_app
       SPRING_DATASOURCE_PASSWORD: gmsr_ci_pwd
