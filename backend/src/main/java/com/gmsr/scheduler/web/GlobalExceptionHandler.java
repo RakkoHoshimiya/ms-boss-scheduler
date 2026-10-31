@@ -63,6 +63,25 @@ public class GlobalExceptionHandler {
                 .body(new ApiError("METHOD_NOT_ALLOWED", "该接口不支持 " + ex.getMethod() + " 方法"));
     }
 
+    /**
+     * 会话/存储不可用（Redis 宕机、连接超时等）。
+     *
+     * 这类是**可重试**的临时故障，用 503 而不是 500 —— 客户端能据此显示「稍后再试」，
+     * 也避免把「依赖挂了」误报成「服务器内部错误」。
+     * 尤其重要：登录/刷新在签发令牌时如果写不进 Redis，必须明确失败，
+     * 绝不能返回一个看似成功、实际没存下的会话。
+     */
+    @ExceptionHandler({
+            org.springframework.data.redis.RedisConnectionFailureException.class,
+            org.springframework.data.redis.RedisSystemException.class,
+            org.springframework.dao.QueryTimeoutException.class,
+    })
+    public ResponseEntity<ApiError> handleStorageUnavailable(Exception ex) {
+        log.error("存储服务不可用：{}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiError("STORAGE_UNAVAILABLE", "会话服务暂时不可用，请稍后重试"));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleOthers(Exception ex) {
         log.error("未处理异常", ex);

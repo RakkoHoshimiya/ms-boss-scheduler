@@ -11,7 +11,10 @@ import com.gmsr.scheduler.dto.ApiDtos.UserView;
 import com.gmsr.scheduler.repository.AppUserRepository;
 import com.gmsr.scheduler.repository.PlayerRepository;
 import com.gmsr.scheduler.security.LoginAttemptService;
+import com.gmsr.scheduler.security.RefreshTokenService;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -20,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** 登录与用户管理。 */
 @Service
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final AppUserRepository userRepository;
     private final PlayerRepository playerRepository;
@@ -65,7 +70,7 @@ public class AuthService {
         // SA-Token 建立服务端会话：access token 2 小时，刷新由 refresh token 负责
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
         String accessToken = cn.dev33.satoken.stp.StpUtil.getTokenValue();
-        String refreshToken = refreshTokenService.issue(user.getId());
+        String refreshToken = refreshTokenService.issue(user.getId(), user.getSessionVersion());
         return new LoginResponse(
                 accessToken,
                 refreshToken,
@@ -84,6 +89,22 @@ public class AuthService {
         if (userId == null) {
             return;
         }
+        // 先把会话版本 +1（拿账号行锁，与「刷新会话」串行化）。
+        // 否则存在这个窗口：刷新已消费旧 token → 这里撤销 → 刷新接着签出新会话，绕过撤销。
+        try {
+            userRepository.findByIdForUpdate(userId).ifPresent(user -> {
+                user.setSessionVersion(user.getSessionVersion() + 1);
+                userRepository.save(user);
+            });
+        } catch (Exception ex) {
+            // 拿不到锁也要继续踢人：撤销会话比递增版本更重要
+            log.warn("递增会话版本失败（继续撤销会话）：{}", ex.getMessage());
+        }
+        revokeSessions(userId);
+    }
+
+    /** 只撤销会话，不碰数据库（账号已被删除时用）。 */
+    private void revokeSessions(Long userId) {
         try {
             cn.dev33.satoken.stp.StpUtil.logout(userId);
         } catch (Exception ignored) {
@@ -92,21 +113,29 @@ public class AuthService {
         refreshTokenService.revokeAll(userId);
     }
 
-    /** 用 refresh token 换取新的 access token（无感刷新）。 */
-    @Transactional(readOnly = true)
+    /**
+     * 用 refresh token 换取新的 access token（无感刷新）。
+     *
+     * 关键点：消费掉旧 token 之后**锁账号行再比对会话版本**。
+     * 这样「刷新」和「改密触发的撤销」不会交错——晚到的那次刷新会因版本不一致被拒。
+     */
+    @Transactional
     public LoginResponse refresh(String refreshToken) {
-        String[] newRefresh = new String[1];
-        Long userId = refreshTokenService.consume(refreshToken, newRefresh);
-        if (userId == null) {
+        RefreshTokenService.Consumed consumed = refreshTokenService.consume(refreshToken);
+        if (consumed == null) {
             throw new BusinessException("登录已过期，请重新登录");
         }
-        AppUser user = userRepository.findById(userId)
+        AppUser user = userRepository.findByIdForUpdate(consumed.userId())
                 .filter(AppUser::isEnabled)
                 .orElseThrow(() -> new BusinessException("账号不可用，请重新登录"));
+        if (user.getSessionVersion() != consumed.sessionVersion()) {
+            // 这个会话在刷新过程中被撤销了（改密 / 重置 / 禁用 / 改权限）
+            throw new BusinessException("登录已失效，请重新登录");
+        }
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
         return new LoginResponse(
                 cn.dev33.satoken.stp.StpUtil.getTokenValue(),
-                newRefresh[0],
+                refreshTokenService.issue(user.getId(), user.getSessionVersion()),
                 saTokenTimeoutSeconds(),
                 toView(user),
                 user.isMustChangePassword());
@@ -247,7 +276,8 @@ public class AuthService {
             throw new BusinessException("至少保留一个管理员账号");
         }
         userRepository.delete(user);
-        kickOut(id);
+        // 账号已删除，不需要递增版本（刷新时会因为找不到账号被拒），只清会话
+        revokeSessions(id);
     }
 
     private static void validatePassword(String password) {

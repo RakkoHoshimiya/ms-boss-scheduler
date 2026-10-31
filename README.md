@@ -71,7 +71,9 @@
    —— 详细项见 [SECURITY.md](SECURITY.md)
 3. **跑后端**：`java -jar gmsr-scheduler.jar`（默认只监听 127.0.0.1:18080）
 4. **构建前端**：`cd frontend && npm ci && npm run build`，把 `dist/` 交给 Nginx 托管
-5. **配 Nginx**：参考 `deploy/gmsr.conf`，把 `/api/` 反代到 127.0.0.1:18080、
+5. **配 Nginx**：把 `deploy/gmsr.conf` 和 `deploy/livekit-rtc.inc` **一起**放进站点的 conf.d 目录
+   （`gmsr.conf` 会 include 后者；不用语音就把那行 include 注释掉，可只放 gmsr.conf），
+   把 `/api/` 反代到 127.0.0.1:18080、
    `/lk/` 反代到 LiveKit 的 7880
 6. **开端口**：按上面的表放行
 7. **验收**：`curl https://<你的域名或IP>:4433/api/health` 返回 ok
@@ -395,10 +397,10 @@ gmsr/
 | 首次登录强制改密 | 账号带 `must_change_password` 标记，前端弹窗拦截不可关闭；**数据库触发器**保证「只清标记不改密码」会被拒绝 |
 | 改密强制（服务端） | 待改密账号在服务端只能：查自己 / 改密码 / 登出 / 公开信息，其余接口一律 403（`MUST_CHANGE_PASSWORD`）—— 光靠前端弹窗可以被直接调接口绕开 |
 | 明文 HTTP | `8080` 只做页面跳转；**API（含登录）在 8080 上一律 403**（跳转救不了已经明文发出去的密码）。只有根证书下载与安装说明保留 HTTP 入口 |
-| refresh token | 一次性消费且**原子**（Redis `GETDEL`）：并发刷新只有一次成功，重放立即失效；Redis 异常时按无效处理（fail closed） |
+| refresh token | 一次性消费且**原子**（Redis `GETDEL`）；**带会话版本**：刷新时锁账号行比对版本，改密/禁用并发时晚到的刷新会被拒。签发用 Redis Lua 原子写（token + 账号索引），Redis 不可用返回 503 而不是假成功 |
 | 改密撤销会话 | 改自己的密码、管理员重置密码、管理员在「编辑账号」里改密码 —— 三条路径都会踢掉该账号的 access + refresh token |
 | 并发排班 | 上人 / 挪人 / 换位 / 整队保存都给车次加**行锁**（`SELECT … FOR UPDATE`），保证「满员检查」「同人单角色」在并发下仍成立 |
-| 事务边界 | 复制车次为单事务（失败不留半截车次）；每周重置用显式事务 + Redis 分布式锁，避免「改了状态没写标记」导致重复重置 |
+| 事务边界 | 复制车次为单事务（失败不留半截车次）；每周重置用显式事务 + **PostgreSQL 事务级咨询锁**（随事务释放，无 TTL / 无 owner 问题），避免「改了状态没写标记」导致重复重置，多实例也不会同时执行 |
 | 密码重置 | 管理员重置后接口只返回提示，**不回显密码**；重置同时把标记置回，本人下次登录必须再改 |
 | 权限 | 读接口匿名可访问；编排类写操作仅 ADMIN / EDITOR；群友只能标记自己所在车次的状态；账号管理仅 ADMIN |
 | 登录态 | SA-Token 会话，存在 Redis（**服务端可随时吊销**）：access token 2 小时、refresh token 7 天滑动续期；不再使用无状态 JWT |

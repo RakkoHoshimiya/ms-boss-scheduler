@@ -35,6 +35,17 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 export const CHANGE_LOG: ChangeGroup[] = [
   {
     date: '10/31',
+    title: '并发与令牌边界加固（第二轮评审）',
+    entries: [
+      { type: 'security', text: '刷新与改密撤销通过「会话版本」协调：refresh token 里带签发时的版本号，刷新时锁账号行比对，版本不符直接拒绝——杜绝「刷新先消费、撤销后执行、刷新又签出新会话」' },
+      { type: 'security', text: '签发 refresh token 改为 Redis Lua 原子写入（token 与账号索引一起写）；Redis 不可用时明确失败并返回 503，不再返回「看似成功但没存下」的会话' },
+      { type: 'fix', text: '移动 / 换位在加锁后**重新读取席位**并确认仍在预期车次，过期时返回冲突让前端刷新，避免用旧的源车次做校验' },
+      { type: 'fix', text: '每周重置的多实例互斥改用 PostgreSQL 事务级咨询锁（随事务自动释放），不再依赖固定值 + TTL 的 Redis 锁' },
+      { type: 'fix', text: '仓库补上 deploy/livekit-rtc.inc，避免按仓库配置新建环境时 Nginx 因 include 缺失而启动失败' },
+    ],
+  },
+  {
+    date: '10/31',
     title: '服务端安全与并发加固',
     entries: [
       { type: 'security', text: '明文 HTTP（8080）不再接受任何 API 请求（含登录），返回 403；页面仍会 301 跳到 HTTPS，根证书下载与安装说明保留 HTTP 入口' },

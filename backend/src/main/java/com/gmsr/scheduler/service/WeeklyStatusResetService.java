@@ -5,7 +5,6 @@ import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.repository.AppSettingRepository;
 import com.gmsr.scheduler.repository.BossRunRepository;
 import java.time.DayOfWeek;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -16,9 +15,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -57,20 +56,28 @@ public class WeeklyStatusResetService {
      * 万一改完状态、写标记失败，下次补跑会再重置一次，把期间用户新标的完成状态抹掉。
      */
     private final TransactionTemplate transactionTemplate;
-    /** 多实例互斥：同一时刻只让一个实例执行重置 */
-    private final StringRedisTemplate redis;
+    /**
+     * 多实例互斥改用 **PostgreSQL 事务级咨询锁**（pg_try_advisory_xact_lock）。
+     *
+     * 为什么不用 Redis 锁：
+     *   - 需要自己维护 owner 标识 + 原子比较删除，锁超时后可能误删别人的锁；
+     *   - Redis 不可用时还得选「继续（可能重复重置）」还是「放弃（可能漏重置）」。
+     * 事务级咨询锁天然满足需求：**随事务结束自动释放**，不会有过期与误删问题，
+     * 也不依赖第二个中间件（重置本来就要写数据库）。
+     */
+    private final JdbcTemplate jdbcTemplate;
 
-    private static final String LOCK_KEY = "gmsr:lock:status-reset";
-    private static final Duration LOCK_TTL = Duration.ofMinutes(5);
+    /** 咨询锁的键（任意固定值，只要全局唯一即可） */
+    private static final long ADVISORY_LOCK_ID = 20261031L;
 
     public WeeklyStatusResetService(BossRunRepository runRepository,
                                     AppSettingRepository settingRepository,
                                     TransactionTemplate transactionTemplate,
-                                    StringRedisTemplate redis) {
+                                    JdbcTemplate jdbcTemplate) {
         this.runRepository = runRepository;
         this.settingRepository = settingRepository;
         this.transactionTemplate = transactionTemplate;
-        this.redis = redis;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /** 每周四 08:00 触发。 */
@@ -95,39 +102,46 @@ public class WeeklyStatusResetService {
     }
 
     /**
-     * 到点了就重置。整个「判断 + 改状态 + 写标记」在一个事务里，并加分布式锁。
+     * 到点了就重置。
      *
-     * @return 本次重置了多少趟车（0 表示这次不需要重置）
+     * 整个「抢锁 + 判断 + 改状态 + 写标记」在**同一个事务**里：
+     * 咨询锁与事务同生共死，不会出现「执行超时后锁过期、原实例又删了新实例的锁」这种问题。
+     *
+     * @return 本次重置了多少趟车（0 表示这次不需要重置，或别的实例正在做）
      */
     public int resetIfDue() {
-        if (!tryLock()) {
-            log.info("状态重置：另一个实例正在执行，本次跳过");
-            return 0;
-        }
-        try {
-            Integer changed = transactionTemplate.execute(status -> doResetIfDue());
-            return changed == null ? 0 : changed;
-        } finally {
-            unlock();
-        }
+        Integer changed = transactionTemplate.execute(status -> {
+            if (!tryAdvisoryLock()) {
+                log.info("状态重置：另一个实例正在执行，本次跳过");
+                return 0;
+            }
+            return doResetIfDue();
+        });
+        return changed == null ? 0 : changed;
     }
 
     /** 手动重置（管理员用，也方便验证）。 */
     public int resetNow() {
-        if (!tryLock()) {
-            throw new BusinessException("另一个实例正在执行重置，请稍后重试");
-        }
-        try {
-            Integer changed = transactionTemplate.execute(status -> {
-                int count = doReset();
-                saveMarker(Instant.now());
-                log.info("状态重置：管理员手动重置，{} 趟车次改回「未完成」", count);
-                return count;
-            });
-            return changed == null ? 0 : changed;
-        } finally {
-            unlock();
-        }
+        Integer changed = transactionTemplate.execute(status -> {
+            if (!tryAdvisoryLock()) {
+                throw new BusinessException("另一个实例正在执行重置，请稍后重试");
+            }
+            int count = doReset();
+            saveMarker(Instant.now());
+            log.info("状态重置：管理员手动重置，{} 趟车次改回「未完成」", count);
+            return count;
+        });
+        return changed == null ? 0 : changed;
+    }
+
+    /**
+     * 抢事务级咨询锁：拿不到说明别的实例已经在做。
+     * 锁在事务提交/回滚时由 PostgreSQL 自动释放，无需 TTL，也没有「误删别人锁」的风险。
+     */
+    private boolean tryAdvisoryLock() {
+        Boolean locked = jdbcTemplate.queryForObject(
+                "select pg_try_advisory_xact_lock(?)", Boolean.class, ADVISORY_LOCK_ID);
+        return Boolean.TRUE.equals(locked);
     }
 
     /** 事务内：判断是否到点，到点则重置并写标记。 */
@@ -148,27 +162,6 @@ public class WeeklyStatusResetService {
         saveMarker(due);
         log.info("状态重置：已把 {} 趟车次改回「未完成」（重置点 {}）", changed, due);
         return changed;
-    }
-
-    /**
-     * 抢锁。Redis 不可用时按「单实例」继续执行 ——
-     * 宁可重复重置（结果仍是全部未完成，无副作用），也不要因为 Redis 抖动漏掉每周重置。
-     */
-    private boolean tryLock() {
-        try {
-            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(LOCK_KEY, "1", LOCK_TTL));
-        } catch (Exception ex) {
-            log.warn("获取重置锁失败（按单实例继续）：{}", ex.getMessage());
-            return true;
-        }
-    }
-
-    private void unlock() {
-        try {
-            redis.delete(LOCK_KEY);
-        } catch (Exception ignored) {
-            // 锁带 TTL，删不掉也会自动过期
-        }
     }
 
     /** 上次重置的时间点（没有记录时返回 null）。 */

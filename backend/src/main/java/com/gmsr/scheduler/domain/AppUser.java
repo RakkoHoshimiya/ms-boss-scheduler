@@ -46,6 +46,24 @@ public class AppUser extends AuditedEntity {
     @Column(name = "must_change_password", nullable = false)
     private boolean mustChangePassword;
 
+    /**
+     * 会话版本。改密 / 重置 / 禁用 / 改权限时 +1。
+     *
+     * 作用：refresh token 里带着签发时的版本号，刷新时和这里的值比对。
+     * 这样即使「刷新」与「撤销」并发，晚到的那次刷新也会因为版本对不上被拒绝，
+     * 不会凭空造出一个绕过撤销的新会话。
+     */
+    @Column(name = "session_version", nullable = false)
+    private long sessionVersion;
+
+    public long getSessionVersion() {
+        return sessionVersion;
+    }
+
+    public void setSessionVersion(long sessionVersion) {
+        this.sessionVersion = sessionVersion;
+    }
+
     /** 绑定的群友；绑定后该账号可以标记自己所在车次的攻坚状态。 */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "player_id")

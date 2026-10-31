@@ -284,6 +284,21 @@ public class RunService {
         Long lowId = Math.min(source.getId(), targetRunId);
         Long highId = Math.max(source.getId(), targetRunId);
         runRepository.findAllByIdForUpdate(List.of(lowId, highId));
+        /**
+         * 拿到锁之后**必须重新读一次席位**。
+         *
+         * 前面那次 findById 是在没加锁时读的：如果另一个请求刚好把这个席位挪走了，
+         * 我们手上拿的还是「它在 source」这个过期结论，于是会：
+         *   - 锁错车次（真正该锁的是它现在所在的那趟）
+         *   - 把席位从错误的源车次「算」出来，结果与用户看到的界面不符
+         * 这里发现源车次变了就直接拒绝，让前端刷新重试。
+         */
+        RunMember fresh = memberRepository.findById(memberId)
+                .orElseThrow(() -> new NotFoundException("席位不存在：" + memberId));
+        if (!fresh.getRun().getId().equals(source.getId())) {
+            throw new BusinessException("这个席位刚刚被挪到别的车次了，请刷新后重试");
+        }
+        member = fresh;
         BossRun target = runRepository.findById(targetRunId)
                 .orElseThrow(() -> new NotFoundException("目标车次不存在：" + targetRunId));
 
@@ -335,6 +350,19 @@ public class RunService {
         // 换位会同时改两趟车，锁住它们（按 id 升序，避免与反向请求死锁）
         runRepository.findAllByIdForUpdate(
                 List.of(Math.min(runA.getId(), runB.getId()), Math.max(runA.getId(), runB.getId())));
+        /**
+         * 拿到锁后重新读两个席位，确认它们仍在原来那两趟车上。
+         * 否则并发下可能：a 已被挪到别的车次，而我们还在用它旧的 runA 做校验与交换。
+         */
+        RunMember freshA = memberRepository.findById(memberId)
+                .orElseThrow(() -> new NotFoundException("席位不存在：" + memberId));
+        RunMember freshB = memberRepository.findById(otherMemberId)
+                .orElseThrow(() -> new NotFoundException("席位不存在：" + otherMemberId));
+        if (!freshA.getRun().getId().equals(runA.getId()) || !freshB.getRun().getId().equals(runB.getId())) {
+            throw new BusinessException("这两个席位刚刚有变动，请刷新后重试");
+        }
+        a = freshA;
+        b = freshB;
         // 必须是同一个 BOSS 的车次才允许换位（不同 BOSS 之间没有「不能同时上」的约束）
         if (!runA.getBoss().getId().equals(runB.getBoss().getId())) {
             throw new BusinessException("只能在同一 BOSS 的车次之间换位");
