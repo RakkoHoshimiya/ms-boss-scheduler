@@ -428,6 +428,27 @@ GMSR_LOGIN_LOCK_MINUTES=15         # 锁定时长（分钟）
 ```
 
 
+## 持续集成
+
+`.github/workflows/ci.yml` 在每次 push / PR 时跑两件事：
+
+| 任务 | 内容 |
+| --- | --- |
+| 后端 | 起 `postgres:16` + `redis:7` service，`mvn verify`。**在空库上由 Flyway 从 V1 建出结构**，再跑真实库并发测试（`GMSR_INTEGRATION_DB=1`），最后断言业务表数量为 8 |
+| 前端 | `npm ci` → `tsc --noEmit` → `npm run build`，并上传 `dist/` |
+
+集成测试（需要真实 PostgreSQL）用环境变量开关控制：
+
+```bash
+# 本地跑（空库或任意测试 schema 均可，Flyway 会自动建结构）
+GMSR_INTEGRATION_DB=1 \
+SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:5432/gmsr?currentSchema=gmsr_ci" \
+SPRING_DATASOURCE_USERNAME=gmsr_app SPRING_DATASOURCE_PASSWORD=*** \
+SPRING_FLYWAY_SCHEMAS=gmsr_ci SPRING_JPA_PROPERTIES_HIBERNATE_DEFAULT_SCHEMA=gmsr_ci \
+mvn test -Dtest=RunMemberStaleReadTest
+```
+
+不设这个变量时，`mvn test` 会跳过集成用例，只跑纯单元测试。
 ## 版本控制
 
 工作区根目录有 git 仓库，**每次改动前先提交一次**，出问题可以立刻回滚。

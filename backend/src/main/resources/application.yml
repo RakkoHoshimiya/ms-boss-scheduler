@@ -14,7 +14,7 @@ spring:
       enabled: true
   datasource:
     # 专用 schema，避免与同库中的其它业务表混淆
-    url: ${GMSR_DB_URL:jdbc:postgresql://127.0.0.1:54233/gmsr?currentSchema=gmsr}
+    url: ${GMSR_DB_URL:jdbc:postgresql://127.0.0.1:54233/gmsr?currentSchema=${GMSR_DB_SCHEMA:gmsr}}
     username: ${GMSR_DB_USER:gmsr_app}
     password: ${GMSR_DB_PASSWORD:CHANGE_ME_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
@@ -28,11 +28,12 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      # 表结构由 Hibernate 按实体生成；数据初始化由 SeedDataImporter 负责
-      ddl-auto: update
+      # 表结构由 Flyway 迁移管理（db/migration），启动时只校验实体与库是否一致。
+      # 任何结构变更都请新增 V2、V3……，不要再让 Hibernate 自动改表。
+      ddl-auto: validate
     properties:
       hibernate:
-        default_schema: gmsr
+        default_schema: ${GMSR_DB_SCHEMA:gmsr}
         jdbc:
           time_zone: Asia/Shanghai
           batch_size: 30
@@ -53,7 +54,18 @@ spring:
           max-idle: 4
 
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
+    # schema 由 Flyway 负责创建；history 表也放在这个 schema 里
+    schemas: ${GMSR_DB_SCHEMA:gmsr}
+    create-schemas: true
+    # 全新的空库：V1 会真的执行，把整套结构建出来。
+    # 已有的库：先用 mvn flyway:baseline 打一次基线（版本 1），
+    #   Flyway 就会认为 V1 已应用、直接跳过，不会重复建表。
+    # 不要打开 baseline-on-migrate：Flyway 11 不允许基线版本与迁移文件同版本共存。
+    baseline-on-migrate: false
+    baseline-version: 1
+    validate-on-migrate: true
   jackson:
     default-property-inclusion: non_null
     time-zone: Asia/Shanghai
