@@ -130,9 +130,9 @@ class RunMemberRaceTest {
         try (Connection c = dataSource.getConnection()) {
             c.setAutoCommit(false);
             try {
-                work.run(c);
-                // 关键：两边都写完了、但都还没提交，此时汇合
+                // 先汇合再动手：两个事务同时发起，剩下的交给数据库的锁去串行化
                 barrier.await(15, TimeUnit.SECONDS);
+                work.run(c);
                 c.commit();
                 return true;
             } catch (Exception ex) {

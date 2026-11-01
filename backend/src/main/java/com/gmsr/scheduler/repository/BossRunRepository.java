@@ -40,6 +40,16 @@ public interface BossRunRepository extends JpaRepository<BossRun, Long> {
     @Query("select r from BossRun r where r.id = :id")
     Optional<BossRun> findByIdForUpdate(@Param("id") Long id);
 
+    /**
+     * 同一融合车里，与给定「难度 + 趟次」对应的所有成员车次。
+     * 融合车在底层是每个 BOSS 各一条车次，增删必须一起动，否则趟次会错位。
+     */
+    @Query("select r from BossRun r join fetch r.boss where r.boss.comboKey = :comboKey "
+            + "and r.tier = :tier and r.runIndex = :runIndex order by r.boss.sortOrder")
+    List<BossRun> findComboSiblings(@Param("comboKey") String comboKey,
+                                    @Param("tier") com.gmsr.scheduler.domain.BossTier tier,
+                                    @Param("runIndex") int runIndex);
+
     /** 批量加锁（换位 / 整队保存时用，避免逐条加锁导致死锁）。 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from BossRun r where r.id in :ids order by r.id")

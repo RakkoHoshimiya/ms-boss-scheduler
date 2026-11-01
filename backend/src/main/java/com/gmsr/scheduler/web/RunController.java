@@ -114,7 +114,7 @@ public class RunController {
 
     @DeleteMapping("/runs/{id}/members/{memberId}")
     public RunView removeMember(@PathVariable Long id, @PathVariable Long memberId) {
-        return runService.removeMember(memberId);
+        return runService.removeMember(id, memberId);
     }
 
     /** 拖拽调车：把某个席位拖到另一趟车上（返回源/目标两趟车的最新数据）。 */

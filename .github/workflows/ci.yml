@@ -92,10 +92,17 @@ jobs:
 
       - name: Shell 语法检查
         run: |
-          set -euo pipefail
-          for f in deploy/*.sh; do
-            bash -n "$f" && echo "  ✓ $f"
+          set -uo pipefail
+          fail=0
+          for f in deploy/*.sh deploy/tests/*.sh; do
+            if bash -n "$f"; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ 语法错误：$f"
+              fail=1
+            fi
           done
+          exit $fail
 
       - name: 必需部署文件是否齐全
         run: |
@@ -109,6 +116,7 @@ jobs:
             deploy/gmsr.conf
             deploy/livekit-rtc.inc
             deploy/gmsr.env.example
+            deploy/tests/restore-guard-test.sh
           )
           missing=0
           for f in "${required[@]}"; do
@@ -116,18 +124,17 @@ jobs:
           done
           exit $missing
 
-      - name: 备份/恢复脚本的关键护栏仍在
+      - name: 恢复脚本护栏行为测试
         run: |
-          set -euo pipefail
-          # 备份：必需配置文件缺失时必须报错退出，不能静默打一个不完整的包
-          grep -q '缺少必需配置文件' deploy/backup.sh
-          # 恢复：默认拒绝覆盖已存在的库
-          grep -q '目标库 .* 已存在' deploy/restore.sh
-          # 恢复：先验证备份文件，再动数据库
-          grep -q 'pg_restore --list' deploy/restore.sh
-          # 恢复：覆盖生产前必须试恢复
-          grep -q '试恢复到临时库' deploy/restore.sh
-          echo '  ✓ 关键护栏都在'
+          # 用假的 docker 模拟容器返回值，真实执行 restore.sh，
+          # 断言它在危险情况下**确实拒绝**（不是靠 grep 源码文字）
+          bash deploy/tests/restore-guard-test.sh
+
+      - name: 备份脚本：缺必需配置时必须失败
+        run: |
+          # 用一个假的 docker 模拟成功导出，指向不存在的配置目录，
+          # 断言 backup.sh 会失败并说明「缺少必需配置文件」
+          bash deploy/tests/backup-guard-test.sh
 
   frontend:
     name: 前端（类型检查 + 构建）

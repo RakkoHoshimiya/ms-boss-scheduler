@@ -63,4 +63,14 @@ public interface RunMemberRepository extends JpaRepository<RunMember, Long> {
     @Modifying
     @Query("delete from RunMember m where m.run in :runs")
     void deleteByRunIn(@Param("runs") Collection<BossRun> runs);
+
+    /** 删角色前先清掉它的席位（run_member.character_id 有外键，直接删角色会失败）。 */
+    @Modifying
+    @Query("delete from RunMember m where m.character.id = :characterId")
+    void deleteByCharacterId(@Param("characterId") Long characterId);
+
+    /** 删群友前先清掉他所有角色的席位。 */
+    @Modifying
+    @Query("delete from RunMember m where m.character.player.id = :playerId")
+    void deleteByPlayerId(@Param("playerId") Long playerId);
 }

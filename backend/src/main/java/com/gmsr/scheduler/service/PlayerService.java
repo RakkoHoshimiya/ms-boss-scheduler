@@ -135,6 +135,7 @@ public class PlayerService {
                 throw new BusinessException("群友昵称已存在：" + nickname);
             }
         });
+        validateQq(request.qq(), id);   // 以前只有新建时校验，改群友会绕过格式/重复检查
         player.setNickname(nickname);
         player.setQq(normalizeQq(request.qq()));
         player.setRemark(request.remark());
@@ -158,6 +159,9 @@ public class PlayerService {
     @Transactional
     public void delete(Long id) {
         Player player = playerRepository.findById(id).orElseThrow(() -> new NotFoundException("群友不存在：" + id));
+        // 外键顺序：席位 → 角色 → 群友。少任何一步都会因为外键失败（以前报的是 500）。
+        memberRepository.deleteByPlayerId(id);
+        characterRepository.deleteByPlayerId(id);
         playerRepository.delete(player);
     }
 
@@ -205,6 +209,7 @@ public class PlayerService {
         if (!character.getPlayer().getId().equals(playerId)) {
             throw new BusinessException("只能删除自己的角色");
         }
+        memberRepository.deleteByCharacterId(characterId);
         characterRepository.delete(character);
     }
 
@@ -281,6 +286,8 @@ public class PlayerService {
     public void deleteCharacter(Long id) {
         GameCharacter character = characterRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("角色不存在：" + id));
+        // 先删它的席位，否则 run_member 的外键会拦住（以前是 500）
+        memberRepository.deleteByCharacterId(id);
         characterRepository.delete(character);
     }
 

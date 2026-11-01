@@ -142,9 +142,12 @@ public class BossService {
     @Transactional
     public void deleteGroup(Long id) {
         BossGroup group = groupRepository.findById(id).orElseThrow(() -> new NotFoundException("分组不存在：" + id));
+        // 顺序：席位 → 车次 → BOSS → 分组。
+        // 以前只清了车次、没删 BOSS，boss.group_id 的外键会拦住（报 500）。
         for (Boss boss : bossRepository.findAllByOrderByGroupSortOrderAscSortOrderAscIdAsc()) {
             if (boss.getGroup().getId().equals(id)) {
                 purgeRunsOfBoss(boss.getId());
+                bossRepository.delete(boss);
             }
         }
         groupRepository.delete(group);

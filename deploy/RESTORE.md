@@ -89,7 +89,8 @@ BACKUP_DIR=/mnt/nas/backup KEEP_DAYS=30 /opt/gmsr/bin/backup.sh
 | --- | --- |
 | 备份文件损坏 / 不是本项目的备份 | **在动任何数据库之前**就中止（`pg_restore --list` + 检查必需表） |
 | 目标库已存在（**任何**库，不只生产） | 拒绝，必须显式 `--force` |
-| 覆盖生产库 | 先自救备份当前库 → 再在临时库做一次试恢复并核对 → 成功后才动生产 |
+| 覆盖生产库 | 先做**整库**自救备份（含所有 schema）→ 再在临时库试恢复并核对 → 成功后才动生产 |
+| 目标库里还有别的 schema | 拒绝，必须再加 `--force-db`（重建数据库会连带删掉它们，本项目备份救不回来） |
 | 目标库不存在 | 直接恢复 |
 
 > 早期版本只保护名字等于 `gmsr` 的库，其他同名业务库会被无提示删除 —— 已修。
@@ -117,8 +118,12 @@ docker exec -e PGPASSWORD=*** 1Panel-postgresql-2MLg \
 # 1) 停服务，避免写入
 systemctl stop gmsr-backend
 
-# 2) 恢复（脚本会先自动备份当前库到 pre-restore-*.dump，再覆盖）
+# 2) 恢复（脚本会先做整库自救备份到 pre-restore-*.dump，再覆盖）
 /opt/gmsr/bin/restore.sh /root/backup/gmsr-<最新>.dump gmsr --force
+
+#    如果这个库里还有别的 schema（脚本会拦下来并列出），
+#    确认可以丢弃后加 --force-db：
+/opt/gmsr/bin/restore.sh /root/backup/gmsr-<最新>.dump gmsr --force --force-db
 
 # 3) 起服务（Flyway 自动补齐结构差异）
 systemctl start gmsr-backend

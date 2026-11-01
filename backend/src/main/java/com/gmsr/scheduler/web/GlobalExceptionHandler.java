@@ -83,17 +83,41 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 数据库约束被触发（容量、同一群友单角色、唯一键等）。
-     * 这些是**用户可理解的业务规则**，不该报成 500；把约束里的提示原样带出来。
+     * 数据库约束被触发（容量、同一群友单角色、唯一键、外键等）。
+     *
+     * 按 SQLSTATE 分类给出用户能懂的提示：
+     *   - 23514 check_violation：我们自己的触发器，消息本身就是中文，直接透传
+     *   - 23503 外键：说明还有关联数据，提示先处理关联
+     *   - 23505 唯一键：提示已存在
+     *   - 其它：给通用提示，**不把原始 SQL 错误抛给前端**（里面有表名、约束名）
      */
     @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> handleConstraint(org.springframework.dao.DataIntegrityViolationException ex) {
         Throwable cause = ex.getMostSpecificCause();
-        String raw = cause == null ? ex.getMessage() : cause.getMessage();
-        String message = raw == null ? "数据不满足约束" : raw.split("\n")[0];
-        log.warn("数据约束拒绝写入：{}", message);
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(new ApiError("CONSTRAINT_VIOLATION", message));
+        String raw = cause == null ? null : cause.getMessage();
+        String sqlState = null;
+        if (cause instanceof java.sql.SQLException sqlEx) {
+            sqlState = sqlEx.getSQLState();
+        }
+
+        String code;
+        String message;
+        if ("23514".equals(sqlState) && raw != null) {
+            // 业务不变量触发器（容量、同人单角色…），消息是给用户看的
+            code = "CONSTRAINT_VIOLATION";
+            message = raw.split("\n")[0].replaceFirst("^ERROR:\s*", "");
+        } else if ("23503".equals(sqlState)) {
+            code = "REFERENCED_DATA";
+            message = "这条数据还被其它记录引用，请先处理关联数据";
+        } else if ("23505".equals(sqlState)) {
+            code = "DUPLICATE";
+            message = "已经存在相同的记录";
+        } else {
+            code = "CONSTRAINT_VIOLATION";
+            message = "数据不满足约束，操作未完成";
+        }
+        log.warn("数据约束拒绝写入（{}）：{}", sqlState, raw);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError(code, message));
     }
 
     @ExceptionHandler(Exception.class)
