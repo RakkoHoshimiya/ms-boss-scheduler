@@ -123,7 +123,7 @@ public class RunController {
             @PathVariable Long runId,
             @PathVariable Long memberId,
             @Valid @RequestBody MoveMemberRequest request) {
-        return runService.moveMember(memberId, request.targetRunId(), request.slotNo());
+        return runService.moveMember(runId, memberId, request.targetRunId(), request.slotNo());
     }
 
     /** 拖拽换位：把两个席位对调（同一 BOSS 下的两趟车之间）。 */
@@ -132,7 +132,7 @@ public class RunController {
             @PathVariable Long runId,
             @PathVariable Long memberId,
             @Valid @RequestBody SwapMemberRequest request) {
-        return runService.swapMembers(memberId, request.otherMemberId());
+        return runService.swapMembers(runId, memberId, request.otherMemberId());
     }
 
     /** 某个群友的车次安排。 */

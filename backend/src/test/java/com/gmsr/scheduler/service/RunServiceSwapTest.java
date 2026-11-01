@@ -159,7 +159,7 @@ class RunServiceSwapTest {
             assertEquals(2, runService.get(f.runB()).memberCount(), "runB 应为满员 2/2");
 
             // P1 的两个角色互换车次（座位号相同，会短暂冲突 → 靠延迟约束放行）
-            var result = runService.swapMembers(f.mA1(), f.mA2());
+            var result = runService.swapMembers(f.runA(), f.mA1(), f.mA2());
 
             assertEquals(f.runB(), runOf(f.mA1()), "A1 应换到 runB");
             assertEquals(f.runA(), runOf(f.mA2()), "A2 应换到 runA");
@@ -180,7 +180,7 @@ class RunServiceSwapTest {
                 st.executeUpdate("update boss_run set boss_id = " + f.boss2Id() + " where id = " + f.runB());
             }
             BusinessException ex = assertThrows(BusinessException.class,
-                    () -> runService.swapMembers(f.mA1(), f.mA2()));
+                    () -> runService.swapMembers(f.runA(), f.mA1(), f.mA2()));
             assertTrue(ex.getMessage().contains("同一 BOSS"), "实际提示：" + ex.getMessage());
         } finally {
             cleanup(f);
@@ -195,7 +195,7 @@ class RunServiceSwapTest {
             // A1(P1, runA) 与 B2(P2, runB) 互换：
             // runA 会同时出现 P2 的 B1、B2 两个角色 → 非法
             BusinessException ex = assertThrows(BusinessException.class,
-                    () -> runService.swapMembers(f.mA1(), f.mB2()));
+                    () -> runService.swapMembers(f.runA(), f.mA1(), f.mB2()));
             assertTrue(ex.getMessage().contains("只能上一个") || ex.getMessage().contains("不能"),
                     "实际提示：" + ex.getMessage());
 
