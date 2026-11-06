@@ -9,10 +9,10 @@ import path from 'node:path';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const BACKEND = process.argv[2] ?? 'https://<YOUR_SERVER_IP>:4433';
 const distDir = path.resolve('dist');
-const ADMIN = { username: 'admin', password: 'CHANGE_ME_ADMIN_PASSWORD' };
-// 专用冒烟测试账号（管理员建的，绑定玩家「群友E」）。
+const ADMIN = { username: 'admin', password: '<ADMIN_PASSWORD>' };
+// 专用冒烟测试账号（管理员建的，绑定玩家「群友O」）。
 // 不要用真人账号：群友会自己改密码，测试会莫名其妙失败。
-const PLAYER = { username: 'smoke', password: process.env.GMSR_SMOKE_PASSWORD ?? 'CHANGE_ME_SMOKE_PASSWORD' };
+const PLAYER = { username: 'smoke', password: process.env.GMSR_SMOKE_PASSWORD ?? 'smoke@2026' };
 
 async function login(cred) {
   const response = await fetch(`${BACKEND}/api/auth/login`, {
@@ -30,7 +30,7 @@ async function login(cred) {
     const changed = await fetch(`${BACKEND}/api/auth/password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'gmsr-token': data.token },
-      body: JSON.stringify({ oldPassword: cred.password, newPassword: 'CHANGE_ME_SMOKE_PASSWORD' }),
+      body: JSON.stringify({ oldPassword: cred.password, newPassword: 'smoke@2026' }),
     });
     if (!changed.ok) {
       throw new Error(`测试账号改密码失败 ${changed.status}`);
@@ -38,7 +38,7 @@ async function login(cred) {
     const again = await fetch(`${BACKEND}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: cred.username, password: 'CHANGE_ME_SMOKE_PASSWORD' }),
+      body: JSON.stringify({ username: cred.username, password: 'smoke@2026' }),
     });
     if (!again.ok) {
       throw new Error(`测试账号二次登录失败 ${again.status}`);

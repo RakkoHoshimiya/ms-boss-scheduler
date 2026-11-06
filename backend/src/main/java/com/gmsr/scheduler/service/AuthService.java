@@ -45,7 +45,7 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             LoginAttemptService loginAttemptService,
             com.gmsr.scheduler.security.RefreshTokenService refreshTokenService,
-            @Value("${gmsr.player.default-password:CHANGE_ME_PLAYER_PASSWORD}") String defaultPassword,
+            @Value("${gmsr.player.default-password:<DEFAULT_PLAYER_PASSWORD>}") String defaultPassword,
             @Value("${sa-token.timeout:7200}") long accessTokenSeconds) {
         this.userRepository = userRepository;
         this.playerRepository = playerRepository;

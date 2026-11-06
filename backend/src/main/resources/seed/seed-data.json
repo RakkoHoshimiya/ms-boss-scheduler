@@ -11,17 +11,17 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "冰雷",
                   "power": 100
                 },
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "剑豪",
                   "power": 70
                 }
@@ -30,12 +30,12 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "琳恩",
                   "power": 60
                 },
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "剑豪",
                   "power": 70
                 }
@@ -44,7 +44,7 @@
             {
               "members": [
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "光枪",
                   "power": 70
                 }
@@ -60,12 +60,12 @@
             {
               "members": [
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "剑豪",
                   "power": 70
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "剑豪",
                   "power": 120
                 }
@@ -81,12 +81,12 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "剑豪",
                   "power": 120
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "Kanna",
                   "power": 160
                 },
@@ -96,12 +96,12 @@
                   "power": 85
                 },
                 {
-                  "player": "群友O",
+                  "player": "群友U",
                   "job": "兔子",
                   "power": 120
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "琳恩",
                   "power": 60
                 }
@@ -117,7 +117,7 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Kanna",
                   "power": 330
                 },
@@ -127,17 +127,17 @@
                   "power": 350
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
                 {
-                  "player": "群友L",
+                  "player": "群友M",
                   "job": "剑豪",
                   "power": 170
                 },
                 {
-                  "player": "群友I",
+                  "player": "群友S",
                   "job": "兔子",
                   "power": 230
                 },
@@ -156,12 +156,12 @@
                   "power": 240
                 },
                 {
-                  "player": "群友J",
+                  "player": "莫",
                   "job": "Sia",
                   "power": 230
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 240
                 },
@@ -171,7 +171,7 @@
                   "power": 200
                 },
                 {
-                  "player": "群友W",
+                  "player": "浮沉随浪逝",
                   "job": "黑骑",
                   "power": 200
                 }
@@ -187,7 +187,7 @@
             {
               "members": [
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 220
                 },
@@ -197,7 +197,7 @@
                   "power": 220
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Sia",
                   "power": 100
                 }
@@ -206,7 +206,7 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Kanna",
                   "power": 330
                 },
@@ -216,7 +216,7 @@
                   "power": 85
                 },
                 {
-                  "player": "群友O",
+                  "player": "群友U",
                   "job": "兔子",
                   "power": 120
                 }
@@ -225,12 +225,12 @@
             {
               "members": [
                 {
-                  "player": "群友L",
+                  "player": "群友M",
                   "job": "剑豪",
                   "power": 170
                 },
                 {
-                  "player": "群友I",
+                  "player": "群友S",
                   "job": "兔子",
                   "power": 230
                 }
@@ -239,17 +239,17 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "剑豪",
                   "power": 120
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "Kanna",
                   "power": 160
                 }
@@ -265,12 +265,12 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "剑豪",
                   "power": 120
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "Kanna",
                   "power": 160
                 },
@@ -280,12 +280,12 @@
                   "power": 85
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "琳恩",
                   "power": 60
                 },
                 {
-                  "player": "群友O",
+                  "player": "群友U",
                   "job": "兔子",
                   "power": 120
                 }
@@ -301,12 +301,12 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Kanna",
                   "power": 330
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
@@ -316,7 +316,7 @@
                   "power": 350
                 },
                 {
-                  "player": "群友L",
+                  "player": "群友M",
                   "job": "剑豪",
                   "power": 170
                 },
@@ -326,7 +326,7 @@
                   "power": 220
                 },
                 {
-                  "player": "群友I",
+                  "player": "群友S",
                   "job": "兔子",
                   "power": 230
                 }
@@ -340,12 +340,12 @@
                   "power": 240
                 },
                 {
-                  "player": "群友J",
+                  "player": "莫",
                   "job": "Sia",
                   "power": 230
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 240
                 },
@@ -355,7 +355,7 @@
                   "power": 200
                 },
                 {
-                  "player": "群友W",
+                  "player": "浮沉随浪逝",
                   "job": "黑骑",
                   "power": 200
                 }
@@ -376,12 +376,12 @@
                   "power": 200
                 },
                 {
-                  "player": "群友W",
+                  "player": "浮沉随浪逝",
                   "job": "黑骑",
                   "power": 200
                 },
                 {
-                  "player": "群友I",
+                  "player": "群友S",
                   "job": "兔子",
                   "power": 230
                 }
@@ -390,7 +390,7 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
@@ -400,7 +400,7 @@
                   "power": 220
                 },
                 {
-                  "player": "群友L",
+                  "player": "群友M",
                   "job": "剑豪",
                   "power": 170
                 }
@@ -414,12 +414,12 @@
                   "power": 350
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 240
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Kanna",
                   "power": 330
                 }
@@ -433,12 +433,12 @@
                   "power": 240
                 },
                 {
-                  "player": "群友J",
+                  "player": "莫",
                   "job": "Sia",
                   "power": 210
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "Kanna",
                   "power": 160
                 }
@@ -459,7 +459,7 @@
                   "power": 200
                 },
                 {
-                  "player": "群友W",
+                  "player": "浮沉随浪逝",
                   "job": "黑骑",
                   "power": 200
                 },
@@ -473,7 +473,7 @@
             {
               "members": [
                 {
-                  "player": "群友C",
+                  "player": "群友H",
                   "job": "剑豪",
                   "power": 315
                 },
@@ -483,7 +483,7 @@
                   "power": 230
                 },
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "Kanna",
                   "power": 330
                 }
@@ -492,7 +492,7 @@
             {
               "members": [
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 240
                 },
@@ -502,7 +502,7 @@
                   "power": 240
                 },
                 {
-                  "player": "群友J",
+                  "player": "莫",
                   "job": "Sia",
                   "power": 210
                 }
@@ -523,12 +523,12 @@
             {
               "members": [
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "光枪",
                   "power": 200
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 }
@@ -537,12 +537,12 @@
             {
               "members": [
                 {
-                  "player": "群友I",
+                  "player": "群友S",
                   "job": "兔子",
                   "power": 240
                 },
                 {
-                  "player": "群友L",
+                  "player": "群友M",
                   "job": "剑豪",
                   "power": 200
                 }
@@ -558,7 +558,7 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "光枪",
                   "power": 20
                 },
@@ -568,7 +568,7 @@
                   "power": 35
                 },
                 {
-                  "player": "群友V",
+                  "player": "pastGod",
                   "job": "Kanna",
                   "power": 14
                 }
@@ -584,7 +584,7 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "光枪",
                   "power": 20
                 },
@@ -594,7 +594,7 @@
                   "power": 35
                 },
                 {
-                  "player": "群友V",
+                  "player": "pastGod",
                   "job": "Kanna",
                   "power": 14
                 }
@@ -610,12 +610,12 @@
             {
               "members": [
                 {
-                  "player": "群友B",
+                  "player": "群友N",
                   "job": "豹弩",
                   "power": 40
                 },
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "琳恩",
                   "power": 60
                 },
@@ -625,7 +625,7 @@
                   "power": 35
                 },
                 {
-                  "player": "群友G",
+                  "player": "群友Q",
                   "job": "剑豪",
                   "power": 35
                 }
@@ -634,12 +634,12 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "光枪",
                   "power": 20
                 },
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "琳恩",
                   "power": 100
                 }
@@ -648,12 +648,12 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "Kanna",
                   "power": 185
                 },
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "光枪",
                   "power": 30
                 }
@@ -669,7 +669,7 @@
             {
               "members": [
                 {
-                  "player": "群友M",
+                  "player": "群友J",
                   "job": "琳恩",
                   "power": 60
                 }
@@ -678,7 +678,7 @@
             {
               "members": [
                 {
-                  "player": "群友N",
+                  "player": "群友T",
                   "job": "剑豪",
                   "power": 70
                 }
@@ -691,7 +691,7 @@
   ],
   "players": [
     {
-      "nickname": "群友B",
+      "nickname": "群友N",
       "characters": [
         {
           "job": "Kanna",
@@ -741,7 +741,7 @@
       ]
     },
     {
-      "nickname": "群友M",
+      "nickname": "群友J",
       "characters": [
         {
           "job": "Kanna",
@@ -776,7 +776,7 @@
       ]
     },
     {
-      "nickname": "群友L",
+      "nickname": "群友M",
       "characters": [
         {
           "job": "剑豪",
@@ -786,7 +786,7 @@
       ]
     },
     {
-      "nickname": "群友G",
+      "nickname": "群友Q",
       "characters": [
         {
           "job": "光枪",
@@ -816,7 +816,7 @@
       ]
     },
     {
-      "nickname": "群友Z",
+      "nickname": "Fycie",
       "characters": [
         {
           "job": "光枪",
@@ -841,7 +841,7 @@
       ]
     },
     {
-      "nickname": "群友C",
+      "nickname": "群友H",
       "characters": [
         {
           "job": "剑豪",
@@ -851,7 +851,7 @@
       ]
     },
     {
-      "nickname": "群友Y",
+      "nickname": "群友W",
       "characters": [
         {
           "job": "兔子",
@@ -861,7 +861,7 @@
       ]
     },
     {
-      "nickname": "群友N",
+      "nickname": "群友T",
       "characters": [
         {
           "job": "琳恩",
@@ -881,7 +881,7 @@
       ]
     },
     {
-      "nickname": "群友I",
+      "nickname": "群友S",
       "characters": [
         {
           "job": "兔子",
@@ -916,7 +916,7 @@
       ]
     },
     {
-      "nickname": "群友J",
+      "nickname": "莫",
       "characters": [
         {
           "job": "Sia",
@@ -926,7 +926,7 @@
       ]
     },
     {
-      "nickname": "群友W",
+      "nickname": "浮沉随浪逝",
       "characters": [
         {
           "job": "黑骑",
@@ -936,7 +936,7 @@
       ]
     },
     {
-      "nickname": "群友O",
+      "nickname": "群友U",
       "characters": [
         {
           "job": "兔子",
@@ -946,7 +946,7 @@
       ]
     },
     {
-      "nickname": "群友V",
+      "nickname": "pastGod",
       "characters": [
         {
           "job": "Kanna",

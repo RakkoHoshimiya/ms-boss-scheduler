@@ -11,7 +11,7 @@
 
 [Unit]
 Description=GMSR 数据库每日备份
-Documentation=https://github.com/群友MHoshimiya/ms-boss-scheduler/blob/main/deploy/RESTORE.md
+Documentation=https://github.com/RakkoHoshimiya/ms-boss-scheduler/blob/main/deploy/RESTORE.md
 After=docker.service
 Requires=docker.service
 

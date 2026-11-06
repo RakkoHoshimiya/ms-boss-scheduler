@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 为还没有账号的群友自动创建只读账号，并绑定到对应群友。
- * 账号名 = 群友昵称，初始密码见 gmsr.player.default-password（默认 CHANGE_ME_ADMIN_PASSWORD）。
+ * 账号名 = 群友昵称，初始密码见 gmsr.player.default-password（默认 <ADMIN_PASSWORD>）。
  *
  * 已存在的账号不会被覆盖，只会补上「绑定群友」这一项，方便管理员改过密码后继续使用。
  */
@@ -37,7 +37,7 @@ public class PlayerAccountInitializer implements ApplicationRunner {
             AppUserRepository userRepository,
             PlayerRepository playerRepository,
             PasswordEncoder passwordEncoder,
-            @Value("${gmsr.player.default-password:CHANGE_ME_PLAYER_PASSWORD}") String defaultPassword) {
+            @Value("${gmsr.player.default-password:<DEFAULT_PLAYER_PASSWORD>}") String defaultPassword) {
         this.userRepository = userRepository;
         this.playerRepository = playerRepository;
         this.passwordEncoder = passwordEncoder;

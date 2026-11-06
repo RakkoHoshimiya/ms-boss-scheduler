@@ -281,7 +281,7 @@ function PlayerFormModal({
             inputMode="numeric"
             value={qq ?? ''}
             onChange={(e) => setQq(e.target.value)}
-            placeholder="例如 100000013"
+            placeholder="例如 <QQ_013>"
           />
         </label>
         <label className="field">

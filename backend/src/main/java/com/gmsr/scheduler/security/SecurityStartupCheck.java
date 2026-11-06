@@ -23,7 +23,7 @@ import org.springframework.stereotype.Component;
 public class SecurityStartupCheck implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityStartupCheck.class);
-    private static final String DEFAULT_ADMIN_PASSWORD = "CHANGE_ME_ADMIN_PASSWORD";
+    private static final String DEFAULT_ADMIN_PASSWORD = "<ADMIN_PASSWORD>";
 
     private final StringRedisTemplate redis;
 

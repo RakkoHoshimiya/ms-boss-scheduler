@@ -573,7 +573,14 @@ public class RunService {
             memberRepository.save(mb);
         }
         memberRepository.flush();
-        return viewPair(runId, runId);
+        /*
+         * 必须返回**两趟不同的车**（源车次与目标车次）。
+         * 之前这里返回的是 viewPair(runId, runId)（同一个 id 两次），
+         * 前端按 source/target 两个 id 去更新本地缓存时，第二个分支永远不成立，
+         * 于是只刷新了一趟车，另一趟还显示换位前的名单 —— 看起来就是「出现了两个相同的名字」，
+         * 手动刷新（重新拉全量）后才恢复正常。
+         */
+        return viewPair(runA.getId(), runB.getId());
     }
 
     /**

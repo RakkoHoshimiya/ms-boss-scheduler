@@ -1,7 +1,7 @@
+> **脱敏说明**：本仓库是公开副本。服务器地址、各类密码/密钥、真实群友昵称与 QQ
+> 均已替换为占位符（`<YOUR_SERVER_IP>`、`<ADMIN_PASSWORD>`、`群友A` 等），
+> 部署时请按 `deploy/gmsr.env.example` 自行填写。
 # GMSR 国际服冒险岛 · BOSS 组队排班系统
-
-> **这是一个脱敏后的开源版本**：所有密码、密钥、服务器 IP、QQ 号与群友昵称都已替换为占位符/示例值。
-> 部署前**必须**先读 [SECURITY.md](SECURITY.md) 配置自己的环境变量，否则无法正常登录。
 
 把原 Excel 排班表（`gmsr排班表.xlsx`）做成了可多人协作的 Web 系统：
 **Spring Boot 3 + JDK 25 + PostgreSQL 18** 后端，**React + TypeScript + Vite** 前端，
@@ -233,7 +233,7 @@ npm run build && node smoke-test.mjs http://127.0.0.1:8080
     同一个 BOSS 你不可能用两个角色同时打，所以服务端对**所有会改动阵容的入口**统一校验：
     `addMember`（加人）、`moveMember`（调车）、`swapMembers`（换位）、`replaceMembers`（整队保存）。
     违反时返回 400 并给出明确提示，例如：
-    `「群友G」已经在这趟车上了（光枪）；同一个 BOSS 不能用两个角色同时打，同一个人同一趟车只能上一个角色`。
+    `「群友Q」已经在这趟车上了（光枪）；同一个 BOSS 不能用两个角色同时打，同一个人同一趟车只能上一个角色`。
     前端在拖拽时就会把这类落点标成红色 `✕ 同一人不能两角色` 并禁止放下；
     「车满兜底换位」也只会挑一个不会造成冲突的对手。
     注：`replaceMembers` 的校验放在删除旧席位**之前**，校验失败不会破坏原有数据。
@@ -278,8 +278,8 @@ npm run build && node smoke-test.mjs http://127.0.0.1:8080
   - 后端接口按能力收紧：`/api/admin/**` 仅 ADMIN；`/api/bosses/**`、`/api/groups/**`、`/api/runs/**`、`/api/weeks/**` 的写操作要 `SCHEDULE`；匿名只能读。
   - 管理员可在 **系统设置 → 编辑账号** 里给某个账号关掉「boss排班 权限」变回只读。
 
-当前数据：**14 位群友 / 30 个角色 / 2 个分组 / 15 个 BOSS / 30 趟车**（原 Excel 的 18 人经整理后：群友O并入群友Y，
-扯 / 群友Z / 群友W 已移除；另有 5 个 BOSS 暂无车次但保留数据，方便以后发车）。
+当前数据：**14 位群友 / 30 个角色 / 2 个分组 / 15 个 BOSS / 30 趟车**（原 Excel 的 18 人经整理后：群友U并入群友W，
+扯 / Fycie / 浮沉随浪逝 已移除；另有 5 个 BOSS 暂无车次但保留数据，方便以后发车）。
 
 BOSS 名称一览（国服官方中文名 + 官方立绘图标）：
 
@@ -422,7 +422,7 @@ gmsr/
 ### 相关环境变量
 
 ```bash
-GMSR_PLAYER_PASSWORD=CHANGE_ME_PLAYER_PASSWORD      # 群友初始密码（重置后的密码），仅后端使用
+GMSR_PLAYER_PASSWORD=<DEFAULT_PLAYER_PASSWORD>      # 群友初始密码（重置后的密码），仅后端使用
 GMSR_JWT_SECRET=...                # JWT 签名密钥
 GMSR_LOGIN_MAX_ATTEMPTS=8          # 单账号失败锁定阈值
 GMSR_LOGIN_MAX_ATTEMPTS_PER_IP=30  # 单 IP 失败锁定阈值
@@ -512,8 +512,8 @@ cd ..                            # 回到工作区根目录
 
 | 账号类型 | 用户名 | 初始密码 | 能做什么 |
 | --- | --- | --- | --- |
-| 管理员 | `admin` | `CHANGE_ME_ADMIN_PASSWORD` | 全部功能：编排车次、管理 BOSS/群友、重置群友密码 |
-| 群友（14 个，自动创建） | **QQ 号**，例如 `100000013` | `CHANGE_ME_PLAYER_PASSWORD` | 查看全部排班；标记自己所在车次的「未完成 / 已完成」；改自己的密码 |
+| 管理员 | `admin` | `<ADMIN_PASSWORD>` | 全部功能：编排车次、管理 BOSS/群友、重置群友密码 |
+| 群友（14 个，自动创建） | **QQ 号**，例如 `<QQ_013>` | `<DEFAULT_PLAYER_PASSWORD>` | 查看全部排班；标记自己所在车次的「未完成 / 已完成」；改自己的密码 |
 | 访客（未登录） | — | — | 只读查看全部排班 |
 
 群友账号一律用 **QQ 号**登录，初始密码由管理员掌握并逐个告知本人；**本人首次登录会被强制要求设置自己的密码**。

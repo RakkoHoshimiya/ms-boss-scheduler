@@ -39,10 +39,10 @@ import org.springframework.transaction.annotation.Transactional;
  * 一次性数据整理（幂等，可反复执行）：
  * 1. 按 GMSR 实际规则修正 BOSS 组队人数上限（猴 / 凶星 / 林波 = 3 人，其余 6 人）
  * 2. 修正从 Excel 解析时串行的 BOSS 名（H敦凯尔）
- * 3. 合并「群友O」到「群友Y」
- * 4. 删除已退出群友（扯 / 群友Z / 群友W）及其账号，并清掉他们占用的席位
+ * 3. 合并「群友U」到「群友W」
+ * 4. 删除已退出群友（扯 / Fycie / 浮沉随浪逝）及其账号，并清掉他们占用的席位
  * 5. 按 QQ 对照表写入 QQ 号与显示名称
- * 6. 登录账号统一改成 QQ 号，初始密码 CHANGE_ME_PLAYER_PASSWORD，并强制首次登录修改密码
+ * 6. 登录账号统一改成 QQ 号，初始密码 <DEFAULT_PLAYER_PASSWORD>，并强制首次登录修改密码
  */
 @Component
 @Order(2)
@@ -50,20 +50,30 @@ public class DataMigrator implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataMigrator.class);
 
-    /**
-     * 一次性历史迁移数据：QQ 号 -> 群友昵称。
-     * 开源版本里是**示例值**；换环境时替换成自己的数据即可。
-     */
+    /** QQ 号 -> 显示名称 */
     private static final Map<String, String> QQ_TO_NAME = new LinkedHashMap<>();
-
-    /** 旧昵称 -> 新昵称（群友改名后仍能定位）。开源版留空即可。 */
+    /** 旧昵称 -> 显示名称（用于改名后仍能定位到原来的人） */
     private static final Map<String, String> RENAMES = new LinkedHashMap<>();
 
     static {
-        // 示例数据
-        QQ_TO_NAME.put("100000001", "群友1");
-        QQ_TO_NAME.put("100000002", "群友2");
-        QQ_TO_NAME.put("100000003", "群友3");
+        QQ_TO_NAME.put("<QQ_006>", "群友I");
+        QQ_TO_NAME.put("<QQ_005>", "群友O");
+        QQ_TO_NAME.put("<QQ_013>", "群友J");
+        QQ_TO_NAME.put("<QQ_012>", "群友M");
+        QQ_TO_NAME.put("<QQ_002>", "群友N");
+        QQ_TO_NAME.put("<QQ_015>", "群友W");
+        QQ_TO_NAME.put("<QQ_003>", "群友H");
+        QQ_TO_NAME.put("<QQ_001>", "群友K");
+        QQ_TO_NAME.put("<QQ_008>", "群友Q");
+        QQ_TO_NAME.put("<QQ_010>", "群友S");
+        QQ_TO_NAME.put("<QQ_011>", "莫");
+        QQ_TO_NAME.put("<QQ_007>", "觉");
+        QQ_TO_NAME.put("<QQ_014>", "群友T");
+        QQ_TO_NAME.put("<QQ_016>", "群友C");
+
+        RENAMES.put("洛哥", "群友O");
+        RENAMES.put("风霜", "群友K");
+        RENAMES.put("pastGod", "群友C");
     }
 
     /** 难度前缀 -> 难度枚举（H=Hard / N=Normal / C=Chaos / E=Extreme / EX=Extreme） */
@@ -174,7 +184,7 @@ public class DataMigrator implements ApplicationRunner {
     /** 按游戏规则需要限制为 3 人的 BOSS */
     private static final List<String> THREE_MAN_BOSSES = List.of("猴", "凶星", "灿烂的凶星", "林波");
     /** 已退出群友，直接删除 */
-    private static final List<String> REMOVED_PLAYERS = List.of("扯", "群友Z", "群友W");
+    private static final List<String> REMOVED_PLAYERS = List.of("扯", "Fycie", "浮沉随浪逝");
     private static final String ACCOUNT_MARKER = "qq-accounts-v3";
     private static final String BOSS_ICON_MARKER = "boss-icons-v2";
     private static final String BOSS_NAME_MARKER = "boss-names-v2";
@@ -185,8 +195,8 @@ public class DataMigrator implements ApplicationRunner {
     private static final String SCHEDULE_MARKER = "schedule-permission-v1";
     private static final String GROUP_RENAME_MARKER = "group-rename-v1";
     private static final String SYNC_PLAYER_MARKER = "sync-player-account-v1";
-    private static final String MERGE_FROM = "群友O";
-    private static final String MERGE_TO = "群友Y";
+    private static final String MERGE_FROM = "群友U";
+    private static final String MERGE_TO = "群友W";
 
     private final BossGroupRepository groupRepository;
     private final BossRepository bossRepository;
@@ -209,7 +219,7 @@ public class DataMigrator implements ApplicationRunner {
             AppUserRepository userRepository,
             AppSettingRepository settingRepository,
             PasswordEncoder passwordEncoder,
-            @Value("${gmsr.player.default-password:CHANGE_ME_PLAYER_PASSWORD}") String defaultPassword) {
+            @Value("${gmsr.player.default-password:<DEFAULT_PLAYER_PASSWORD>}") String defaultPassword) {
         this.groupRepository = groupRepository;
         this.bossRepository = bossRepository;
         this.runRepository = runRepository;
@@ -732,7 +742,7 @@ public class DataMigrator implements ApplicationRunner {
                 });
     }
 
-    /** 3. 群友O = 群友Y：角色与已排席位都转到群友Y名下 */
+    /** 3. 群友U = 群友W：角色与已排席位都转到群友W名下 */
     private void mergePlayers() {
         Player from = playerRepository.findByNickname(MERGE_FROM).orElse(null);
         Player to = playerRepository.findByNickname(MERGE_TO).orElse(null);
@@ -751,7 +761,7 @@ public class DataMigrator implements ApplicationRunner {
                     .findFirst()
                     .orElse(null);
             if (target == null) {
-                // 群友Y名下没有同样的角色，直接把角色过继过去
+                // 群友W名下没有同样的角色，直接把角色过继过去
                 character.setPlayer(to);
                 characterRepository.save(character);
                 toCharacters.add(character);

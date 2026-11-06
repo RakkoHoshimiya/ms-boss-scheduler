@@ -1,6 +1,7 @@
 package com.gmsr.scheduler.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -165,6 +166,18 @@ class RunServiceSwapTest {
             assertEquals(f.runA(), runOf(f.mA2()), "A2 应换到 runA");
             assertEquals(2, result.get("source").memberCount());
             assertEquals(2, result.get("target").memberCount());
+
+            /*
+             * 前端拿 source / target 两个对象直接更新本地缓存。
+             * 如果后端把两趟车返回成同一个（曾经就是这样），
+             * 前端只会更新其中一趟，另一趟保留换位前的名单 ——
+             * 界面上就会看到「两个相同的名字」，直到手动刷新才恢复。
+             */
+            var sourceView = result.get("source");
+            var targetView = result.get("target");
+            assertNotEquals(sourceView.id(), targetView.id(), "换位必须返回两趟不同的车");
+            assertEquals(f.runA(), sourceView.id(), "source 应是换位后仍在 runA 的那趟");
+            assertEquals(f.runB(), targetView.id(), "target 应是换位后仍在 runB 的那趟");
         } finally {
             cleanup(f);
         }

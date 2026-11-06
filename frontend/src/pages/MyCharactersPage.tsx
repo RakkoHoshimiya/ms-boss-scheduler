@@ -117,7 +117,7 @@ export default function MyCharactersPage() {
                   value={displayName}
                   maxLength={64}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="例如 群友N"
+                  placeholder="例如 群友T"
                 />
               </label>
               <button className="btn primary" type="submit" disabled={savingName || !displayName.trim()}>

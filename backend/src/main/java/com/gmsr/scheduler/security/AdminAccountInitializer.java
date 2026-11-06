@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 首次启动且系统中没有任何用户时，按配置创建默认管理员账号。
- * 用户名默认 admin，密码默认 CHANGE_ME_ADMIN_PASSWORD，可用环境变量 GMSR_ADMIN_USER / GMSR_ADMIN_PASSWORD 覆盖。
+ * 用户名默认 admin，密码默认 <ADMIN_PASSWORD>，可用环境变量 GMSR_ADMIN_USER / GMSR_ADMIN_PASSWORD 覆盖。
  */
 @Component
 @Order(4)
@@ -31,7 +31,7 @@ public class AdminAccountInitializer implements ApplicationRunner {
             AppUserRepository userRepository,
             PasswordEncoder passwordEncoder,
             @Value("${gmsr.admin.username:admin}") String adminUsername,
-            @Value("${gmsr.admin.password:CHANGE_ME_ADMIN_PASSWORD}") String adminPassword) {
+            @Value("${gmsr.admin.password:<ADMIN_PASSWORD>}") String adminPassword) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.adminUsername = adminUsername;

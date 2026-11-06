@@ -23,7 +23,7 @@ fi
 echo "==> 2. 创建 PostgreSQL 数据库与账号"
 docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='gmsr_app'" \
   | grep -q 1 || docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres \
-      -c "CREATE ROLE gmsr_app LOGIN PASSWORD 'CHANGE_ME_DB_PASSWORD';"
+      -c "CREATE ROLE gmsr_app LOGIN PASSWORD '<DB_PASSWORD>';"
 docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='gmsr'" \
   | grep -q 1 || docker exec "$PG_CONTAINER" psql -U "${PG_SUPERUSER:-postgres}" -d postgres \
       -c "CREATE DATABASE gmsr OWNER gmsr_app ENCODING 'UTF8' TEMPLATE template0;"
