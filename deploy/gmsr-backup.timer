@@ -1,0 +1,11 @@
+# 每天 04:00 备份（Persistent=true：停机错过后，开机补跑一次）
+[Unit]
+Description=每天 04:00 备份 GMSR 数据库
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

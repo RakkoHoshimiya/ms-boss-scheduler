@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>语音音量诊断</title>
+<style>
+  body { margin: 0; padding: 18px; background: #0d1117; color: #e6edf7;
+         font: 15px/1.7 system-ui, "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #8b9ab5; font-size: 13px; margin-bottom: 16px; }
+  .card { background: #141c2b; border: 1px solid #26314a; border-radius: 11px;
+          padding: 14px 16px; margin-bottom: 13px; }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+  .hint { color: #8b9ab5; font-size: 13px; margin: 6px 0 10px; }
+  ul { margin: 0; padding-left: 20px; }
+  li { margin: 3px 0; font-size: 13.5px; }
+  .ok { color: #4ade80; } .bad { color: #ff8f8f; } .warn { color: #ffb547; }
+  code { background: #0b1220; border: 1px solid #26314a; border-radius: 5px;
+         padding: 1px 6px; font-size: 12.5px; color: #ffb547; }
+  pre { background: #0b1220; border: 1px solid #26314a; border-radius: 9px;
+        padding: 12px; font-size: 12px; line-height: 1.65; white-space: pre-wrap;
+        word-break: break-all; color: #8b9ab5; max-height: 240px; overflow: auto; }
+  button { padding: 9px 15px; border-radius: 9px; border: 1px solid #26314a;
+           background: #1b2536; color: #e6edf7; font-size: 14px; cursor: pointer;
+           min-height: 40px; margin: 0 8px 8px 0; }
+  button.primary { background: #ffb547; border-color: #ffb547; color: #17202f; font-weight: 600; }
+  button.tiny { font-size: 12.5px; padding: 6px 10px; min-height: 32px; }
+  input[type=range] { width: 100%; accent-color: #ffb547; min-height: 30px; }
+  .result { margin-top: 10px; font-size: 13.5px; }
+  .step-num { display:inline-block; width:22px; height:22px; line-height:22px; text-align:center;
+              border-radius:50%; background:#26314a; font-size:12.5px; margin-right:6px; }
+</style>
+</head>
+<body>
+  <h1>语音音量诊断</h1>
+  <div class="sub">按 1 → 2 → 3 顺序测试。哪一步听不到声音，就说明问题出在那一层。</div>
+
+  <div class="card">
+    <h2>环境检查</h2>
+    <ul id="env"></ul>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">1</span>普通音频元素测试（最基础的播放能力）</h2>
+    <p class="hint">用一个真实的音频文件测试。如果这一步都听不到，说明和语音代码无关，
+      是<b>设备/系统输出</b>的问题（比如没插音箱耳机、系统音量静音、浏览器标签页被静音）。</p>
+    <button class="primary" id="el-play">▶ 播放 / 停止</button>
+    <button class="tiny" id="el-loop">循环（方便调音量）</button>
+    <div class="result" id="el-result">等待测试</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">2</span>WebAudio 振荡器测试（纯代码发声，不依赖文件）</h2>
+    <p class="hint">会发出 440Hz 的「嘟」声。听得到说明 WebAudio 通路正常。</p>
+    <button class="primary" id="osc-play">▶ 播放 / 停止</button>
+    <div class="result" id="osc-result">等待测试</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">3</span>增益（音量放大）测试</h2>
+    <p class="hint">先让上面任一个声音响着，再拖动下面的滑块。能听到音量明显变化，
+      说明浏览器支持音量放大。</p>
+    <div>音量：<b id="volLabel">100%</b></div>
+    <input type="range" id="vol" min="0" max="1.5" step="0.05" value="1">
+    <div class="result" id="gain-result">拖动滑块查看效果</div>
+  </div>
+
+  <div class="card">
+    <h2>详细环境（可截图 / 复制）</h2>
+    <button id="copy">复制全部信息</button>
+    <pre id="dump">（正在收集…）</pre>
+  </div>
+
+<script>
+  const env = document.getElementById('env');
+  const li = (t, cls) => {
+    const el = document.createElement('li');
+    if (cls) el.className = cls;
+    el.textContent = t;
+    env.appendChild(el);
+  };
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const secure = window.isSecureContext;
+  const hasPc = typeof RTCPeerConnection !== 'undefined';
+
+  li('访问地址：' + location.origin, secure ? 'ok' : 'bad');
+  li('安全上下文（HTTPS）：' + (secure ? '是' : '否 —— 浏览器会禁用语音'), secure ? 'ok' : 'bad');
+  li('RTCPeerConnection：' + (hasPc ? '有' : '没有'), hasPc ? 'ok' : 'bad');
+  li('AudioContext：' + (AC ? '有' : '没有'), AC ? 'ok' : 'bad');
+  li('页面是否被静音（浏览器标签静音）：' +
+     (navigator.userAgent.includes('Chrome') ? '（看地址栏标签上的喇叭图标）' : '未知'), 'warn');
+  li('系统是否开着声音、有没有插耳机/音箱：需要你确认', 'warn');
+
+  // ---------- 步骤 1：普通 audio 元素 ----------
+  // 用一小段程序生成的正弦波 wav（data URI），避免依赖外部文件
+  function makeToneWav(seconds, freq, rate) {
+    const n = Math.floor(rate * seconds);
+    const buf = new ArrayBuffer(44 + n * 2);
+    const view = new DataView(buf);
+    const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); view.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true); view.setUint32(24, rate, true);
+    view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    str(36, 'data'); view.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) {
+      view.setInt16(44 + i * 2, Math.sin((2 * Math.PI * freq * i) / rate) * 0x7000, true);
+    }
+    let bin = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  const TONE = makeToneWav(2, 440, 44100);
+  const audioEl = new Audio(TONE);
+  audioEl.volume = 1;
+  const elResult = document.getElementById('el-result');
+  const elBtn = document.getElementById('el-play');
+  let elOn = false;
+
+  audioEl.addEventListener('error', () => {
+    elResult.innerHTML = '<span class="bad">音频元素报错：' + (audioEl.error && audioEl.error.message) + '</span>';
+  });
+
+  elBtn.addEventListener('click', async () => {
+    try {
+      if (elOn) {
+        audioEl.pause();
+        elOn = false;
+        elBtn.textContent = '▶ 播放 / 停止';
+        elResult.textContent = '已停止';
+        return;
+      }
+      audioEl.currentTime = 0;
+      await audioEl.play();
+      elOn = true;
+      elBtn.textContent = '⏸ 正在播放，点此停止';
+      elResult.innerHTML = '<span class="ok">正在播放，音量 = 1.0</span>' +
+        '<br>如果你<b>听不到</b>，请检查：① 系统音量 ② 是否插了耳机/音箱 ③ 浏览器标签是否被静音（地址栏标签上的喇叭图标）';
+    } catch (e) {
+      elResult.innerHTML = '<span class="bad">播放被拒绝：' + e.message + '</span>';
+    }
+  });
+
+  document.getElementById('el-loop').addEventListener('click', async () => {
+    audioEl.loop = !audioEl.loop;
+    if (audioEl.loop && !elOn) {
+      try { await audioEl.play(); elOn = true; elBtn.textContent = '⏸ 正在播放，点此停止'; } catch {}
+    }
+    elResult.textContent = audioEl.loop ? '已开启循环播放' : '已关闭循环';
+  });
+
+  // ---------- 步骤 2：WebAudio 振荡器 ----------
+  let ctx = null, osc = null, gain = null;
+  const oscResult = document.getElementById('osc-result');
+  const oscBtn = document.getElementById('osc-play');
+
+  oscBtn.addEventListener('click', async () => {
+    try {
+      if (!AC) { oscResult.innerHTML = '<span class="bad">浏览器不支持 AudioContext</span>'; return; }
+      if (osc) {
+        osc.stop(); osc = null;
+        oscBtn.textContent = '▶ 播放 / 停止';
+        oscResult.textContent = '已停止';
+        return;
+      }
+      if (!ctx) {
+        ctx = new AC({ latencyHint: 'interactive' });
+        gain = ctx.createGain();
+        gain.connect(ctx.destination);
+      }
+      await ctx.resume();
+      osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 440;
+      osc.connect(gain);
+      gain.gain.value = Number(document.getElementById('vol').value);
+      osc.start();
+      oscBtn.textContent = '⏸ 正在响，点此停止';
+      oscResult.innerHTML = '<span class="ok">正在播放 440Hz</span> · 上下文状态：<code>' + ctx.state + '</code>';
+    } catch (e) {
+      oscResult.innerHTML = '<span class="bad">失败：' + e.message + '</span>';
+    }
+  });
+
+  // ---------- 步骤 3：增益 ----------
+  const vol = document.getElementById('vol');
+  const volLabel = document.getElementById('volLabel');
+  const gainResult = document.getElementById('gain-result');
+
+  vol.addEventListener('input', () => {
+    const v = Number(vol.value);
+    volLabel.textContent = Math.round(v * 100) + '%';
+    audioEl.volume = Math.min(1, v);          // 普通元素上限就是 1
+    if (gain) gain.gain.setTargetAtTime(v, 0, 0.02);
+    gainResult.innerHTML =
+      '设定倍率 <code>' + v.toFixed(2) + '</code> · ' +
+      '普通音频元素实际音量 <code>' + audioEl.volume.toFixed(2) + '</code>' +
+      (v > 1 ? '<br><span class="warn">注意：>100% 时普通音频元素无法放大（浏览器限制），' +
+               '只有 WebAudio 增益能放大 → 这就是为什么语音音量必须走 WebAudio</span>' : '');
+  });
+
+  // ---------- 信息导出 ----------
+  function buildInfo() {
+    return [
+      '地址: ' + location.origin,
+      '安全上下文: ' + secure,
+      'User-Agent: ' + navigator.userAgent,
+      'RTCPeerConnection: ' + hasPc,
+      'AudioContext: ' + (AC ? '有' : '无'),
+      'AudioContext state: ' + (ctx ? ctx.state : '(未创建)'),
+      'audio 元素测试: ' + elResult.textContent.slice(0, 120),
+      '振荡器测试: ' + oscResult.textContent.slice(0, 120),
+      '屏幕: ' + screen.width + 'x' + screen.height + ' dpr=' + devicePixelRatio,
+      '平台: ' + (navigator.userAgentData ? JSON.stringify(navigator.userAgentData.platform) : 'n/a'),
+    ].join('\n');
+  }
+  document.getElementById('dump').textContent = buildInfo();
+  document.getElementById('copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(buildInfo());
+      alert('已复制，可以发给管理员');
+    } catch {
+      alert('复制失败，请截图这一页');
+    }
+  });
+</script>
+</body>
+</html>

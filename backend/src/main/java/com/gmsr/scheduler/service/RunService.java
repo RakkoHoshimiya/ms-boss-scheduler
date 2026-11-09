@@ -1,0 +1,840 @@
+package com.gmsr.scheduler.service;
+
+import com.gmsr.scheduler.domain.Boss;
+import com.gmsr.scheduler.domain.BossRun;
+import com.gmsr.scheduler.domain.BossTier;
+import com.gmsr.scheduler.domain.GameCharacter;
+import com.gmsr.scheduler.domain.RunMember;
+import com.gmsr.scheduler.dto.RunDtos.MemberRequest;
+import com.gmsr.scheduler.dto.RunDtos.MemberUpdateRequest;
+import com.gmsr.scheduler.dto.RunDtos.MemberView;
+import com.gmsr.scheduler.dto.RunDtos.PlayerRunView;
+import com.gmsr.scheduler.dto.RunDtos.RunRequest;
+import com.gmsr.scheduler.dto.RunDtos.RunView;
+import com.gmsr.scheduler.repository.BossRepository;
+import com.gmsr.scheduler.repository.BossRunRepository;
+import com.gmsr.scheduler.repository.GameCharacterRepository;
+import com.gmsr.scheduler.repository.RunMemberRepository;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/** 车次与席位编排（按排班周期组织）。 */
+@Service
+public class RunService {
+
+    private final BossRunRepository runRepository;
+    private final RunMemberRepository memberRepository;
+    private final BossRepository bossRepository;
+    private final GameCharacterRepository characterRepository;
+    /** 融合车「要打全打」的唯一入口：定位同一趟的全部成员车次 */
+    private final ComboGuard comboGuard;
+    /** 用于 refresh：强制从数据库重读实体，绕过 JPA 一级缓存 */
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    public RunService(
+            BossRunRepository runRepository,
+            RunMemberRepository memberRepository,
+            BossRepository bossRepository,
+            GameCharacterRepository characterRepository,
+            ComboGuard comboGuard) {
+        this.runRepository = runRepository;
+        this.memberRepository = memberRepository;
+        this.bossRepository = bossRepository;
+        this.characterRepository = characterRepository;
+        this.comboGuard = comboGuard;
+    }
+
+    /** 全部车次。 */
+    @Transactional(readOnly = true)
+    public List<RunView> list() {
+        return assemble(runRepository.findAllByOrderByBossSortOrderAscRunIndexAsc());
+    }
+
+    @Transactional(readOnly = true)
+    public RunView get(Long id) {
+        BossRun run = runRepository.findById(id).orElseThrow(() -> new NotFoundException("车次不存在：" + id));
+        return assemble(List.of(run)).getFirst();
+    }
+
+    /** 同 BOSS、同难度下的下一个趟次序号。 */
+    private int nextRunIndex(Boss boss, BossTier tier) {
+        return runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).stream()
+                .filter(run -> run.getTier() == tier)
+                .mapToInt(BossRun::getRunIndex)
+                .max()
+                .orElse(0) + 1;
+    }
+
+    @Transactional
+    public RunView create(RunRequest request) {
+        Boss boss = bossRepository.findById(request.bossId())
+                .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
+        BossRun run = new BossRun();
+        run.setBoss(boss);
+        run.setTier(requireAllowedTier(boss, request.tier() == null ? boss.getTier().name() : request.tier()));
+        BossTier tier = run.getTier();
+        int runIndex = request.runIndex() == null ? nextRunIndex(boss, tier) : request.runIndex();
+        String comboKey = boss.getComboKey();
+
+        /*
+         * 融合车在底层是「每个成员 BOSS 各一条车次」。
+         * 如果只给其中一个 BOSS 建车次，各 BOSS 的趟数就会错位：
+         * 融合车趟数以主 BOSS 为准，于是别的页面会看到「多出来的一趟只有某个 BOSS」。
+         * 所以这里一次性把同一融合车的所有成员都建上。
+         */
+        BossRun created = null;
+        for (Boss target : comboMembers(boss)) {
+            BossRun row = new BossRun();
+            row.setBoss(target);
+            row.setTier(tier);
+            row.setRunIndex(runIndex);
+            row.setScheduled(request.scheduled());
+            row.setStatus(request.status() == null
+                    ? BossRun.Status.PLANNED
+                    : BossRun.Status.valueOf(request.status()));
+            row.setNote(request.note());
+            runRepository.save(row);
+            if (target.getId().equals(boss.getId())) {
+                created = row;
+            }
+        }
+        return get(created.getId());
+    }
+
+    @Transactional
+    public RunView update(Long id, RunRequest request) {
+        // 加锁：改绑 BOSS 会改变允许的容量，必须和「加人」串行化
+        BossRun run = runRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + id));
+        if (request.bossId() != null && !request.bossId().equals(run.getBoss().getId())) {
+            Boss boss = bossRepository.findById(request.bossId())
+                    .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
+            // 应用层先给出友好提示（数据库触发器 trg_run_rebind_capacity 是兜底）
+            long members = memberRepository.countByRunId(id);
+            if (members > boss.getCapacity()) {
+                throw new BusinessException("无法改到「" + boss.getName() + "」：它最多 "
+                        + boss.getCapacity() + " 人，这趟车已经有 " + members + " 个席位");
+            }
+            run.setBoss(boss);
+        }
+        if (request.tier() != null) {
+            run.setTier(requireAllowedTier(run.getBoss(), request.tier()));
+        }
+        if (request.runIndex() != null) {
+            run.setRunIndex(request.runIndex());
+        }
+        run.setScheduled(request.scheduled());
+        if (request.status() != null) {
+            run.setStatus(BossRun.Status.valueOf(request.status()));
+        }
+        run.setNote(request.note());
+        runRepository.save(run);
+        return get(id);
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        BossRun run = runRepository.findById(id).orElse(null);
+        if (run == null) {
+            // 幂等：融合车场景前端会逐个删成员车次，后面的已经不存在了，不该报错
+            return;
+        }
+        // 融合车：同一趟的所有成员车次一起删，否则趟次会错位
+        List<BossRun> targets = comboTrip(run);
+
+        for (BossRun target : targets) {
+            memberRepository.deleteAll(memberRepository.findByRunIdOrderBySlotNoAscIdAsc(target.getId()));
+        }
+        memberRepository.flush();
+        runRepository.deleteAll(targets);
+
+        // 删完把同一 BOSS + 难度下的趟次重新编号成 1..n（否则会留下断号）
+        for (BossRun target : targets) {
+            renumberTier(target.getBoss().getId(), target.getTier());
+        }
+    }
+
+    /** 把某个 BOSS 在某个难度下的车次重新编号成 1..n。 */
+    private void renumberTier(Long bossId, BossTier tier) {
+        List<BossRun> runs = runRepository.findByBossIdOrderByRunIndexAsc(bossId).stream()
+                .filter(r -> r.getTier() == tier)
+                .sorted(java.util.Comparator.comparingInt(BossRun::getRunIndex)
+                        .thenComparing(BossRun::getId))
+                .toList();
+        int next = 1;
+        for (BossRun r : runs) {
+            if (r.getRunIndex() != next) {
+                r.setRunIndex(next);
+            }
+            next++;
+        }
+        runRepository.saveAll(runs);
+    }
+
+    /**
+     * 同一个融合车里的所有成员 BOSS（含自己）。
+     * 非融合车就返回自己一个。
+     */
+    private List<Boss> comboMembers(Boss boss) {
+        return comboGuard.membersOf(boss);
+    }
+
+    /**
+     * 把某个 BOSS 的车次重新编号。
+     * 编号按「难度」分组各自从 1 开始（Normal 第1趟、第2趟…；Chaos 第1趟、第2趟…），
+     * 因为排班页是按难度分开显示的。
+     *
+     * 融合车必须整组重排：只重排其中一个成员 BOSS，
+     * 各 BOSS 的 run_index 就对不上了（融合车按「同难度 + 同趟次」找兄弟车次，
+     * 一旦错位就永远凑不齐同一趟）。因此这里对该融合车的**全部成员 BOSS**
+     * 各自重排一次；重排是幂等的，重复执行结果相同。
+     */
+    @Transactional
+    public List<RunView> resequence(Long bossId) {
+        Boss boss = bossRepository.findById(bossId)
+                .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + bossId));
+        List<Boss> targets = comboMembers(boss);
+        List<Long> touchedRunIds = new ArrayList<>();
+        // 按 BOSS id 升序处理，保证多成员时的写入顺序稳定（与加锁顺序一致，避免死锁）
+        for (Boss target : targets.stream()
+                .sorted(java.util.Comparator.comparing(Boss::getId))
+                .toList()) {
+            touchedRunIds.addAll(renumberBoss(target.getId()));
+        }
+        runRepository.flush();
+        /*
+         * 必须 flush 后**重新查库**再组装视图。
+         * 直接复用 renumberBoss 返回的实体有两个问题：
+         *   1) 同一融合车的多个成员 BOSS 会各自返回一批实体，合并后可能重复；
+         *   2) 重排后的 runIndex 需要在刷写后按新值排序，内存里的顺序还是旧的。
+         */
+        if (touchedRunIds.isEmpty()) {
+            return List.of();
+        }
+        List<BossRun> reloaded = runRepository.findAllById(touchedRunIds);
+        return assemble(reloaded);
+    }
+
+    /** 把单个 BOSS 的车次按「难度分组」重排成 1..n，返回被重排的车次 id。 */
+    private List<Long> renumberBoss(Long bossId) {
+        List<BossRun> runs = runRepository.findByBossIdOrderByRunIndexAsc(bossId).stream()
+                .sorted(java.util.Comparator
+                        .comparing((BossRun run) -> run.getTier().name())
+                        .thenComparing(BossRun::getRunIndex)
+                        .thenComparing(BossRun::getId))
+                .toList();
+        Map<String, Integer> counters = new java.util.LinkedHashMap<>();
+        List<Long> ids = new ArrayList<>(runs.size());
+        for (BossRun run : runs) {
+            int next = counters.merge(run.getTier().name(), 1, Integer::sum);
+            run.setRunIndex(next);
+            ids.add(run.getId());
+        }
+        runRepository.saveAll(runs);
+        return ids;
+    }
+
+    /**
+     * 复制一趟车到同一 BOSS 下的新序号。
+     *
+     * 为什么放在 service 里：以前是控制器先 create 再逐个 addMember，
+     * 每次调用各自提交 —— 中途某个成员失败时，新车次和已复制的部分成员会留在库里，
+     * 重试还会多出几趟车。现在整个过程在一个事务里，要么全成要么全不成。
+     *
+     * 融合车：复制的是「一趟」，所以每个成员 BOSS 都要复制出一条同趟次的车次
+     * 并写入相同阵容。只复制主 BOSS 会让 7 个 BOSS 的趟数错位。
+     */
+    @Transactional
+    public RunView copyRun(Long sourceId) {
+        // 锁住源车次，避免复制过程中源阵容被并发改动
+        BossRun sourceRun = runRepository.findByIdForUpdate(sourceId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + sourceId));
+        RunView source = get(sourceId);
+        Boss boss = sourceRun.getBoss();
+        BossTier tier = sourceRun.getTier();
+
+        /*
+         * 融合车：拿到同一趟的全部成员车次，锁住后逐条复制。
+         * 非融合车时 trip 只有自身一条，行为与以前完全一致。
+         */
+        List<BossRun> sourceTrip = comboTrip(sourceRun);
+        lockTrip(sourceTrip);
+
+        BossRun created = null;
+        /*
+         * 趟次必须以主 BOSS 为基准算一次，所有成员 BOSS 用**同一个** runIndex。
+         * 如果每个成员各自算下一个趟次，一旦历史数据里各 BOSS 趟数不一致
+         * （融合车残缺时就是这样），复制出来的新趟会在各 BOSS 上落到不同趟次，
+         * 反而制造新的错位。融合车的语义就是「同一趟」，所以号必须一致。
+         */
+        int newRunIndex = nextRunIndex(boss, tier);
+        for (BossRun sourceRow : sourceTrip) {
+            Boss memberBoss = sourceRow.getBoss();
+            BossRun copy = new BossRun();
+            copy.setBoss(memberBoss);
+            copy.setTier(tier);
+            copy.setRunIndex(newRunIndex);
+            copy.setScheduled(source.scheduled());
+            copy.setStatus(BossRun.Status.PLANNED);
+            copy.setNote(source.note());
+            runRepository.save(copy);
+            runRepository.flush();
+
+            for (MemberView member : source.members()) {
+                GameCharacter character = characterRepository.findById(member.characterId())
+                        .orElseThrow(() -> new NotFoundException("角色不存在：" + member.characterId()));
+                ensureSingleCharacterPerPlayer(copy.getId(), character.getId(), null);
+                RunMember row = new RunMember();
+                row.setRun(copy);
+                row.setCharacter(character);
+                row.setSlotNo(member.slotNo());
+                row.setRole(RunMember.Role.valueOf(member.role()));
+                row.setStatus(RunMember.Status.valueOf(member.status()));
+                row.setNote(member.note());
+                memberRepository.save(row);
+            }
+            memberRepository.flush();
+            if (memberBoss.getId().equals(boss.getId())) {
+                created = copy;
+            }
+        }
+        if (created == null) {
+            // 理论上不会发生（tripOf 一定包含自身），兜底避免 NPE
+            throw new NotFoundException("复制失败：找不到源车次对应的目标：" + sourceId);
+        }
+        return get(created.getId());
+    }
+
+    @Transactional
+    public RunView addMember(Long runId, MemberRequest request) {
+        BossRun run = runRepository.findById(runId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
+        GameCharacter character = characterRepository.findById(request.characterId())
+                .orElseThrow(() -> new NotFoundException("角色不存在：" + request.characterId()));
+
+        /*
+         * 融合车「要打全打」：同一趟的每个成员 BOSS 都必须有这个人。
+         * 以前只加到一个 BOSS 上，靠前端循环 7 次去补齐；
+         * 只要中间某次失败（满员、同人双角色…），就会留下「某个 BOSS 上少一个人」的脏数据，
+         * 于是车次一览表 / 我的车次 / boss排班 三处看起来对不上。
+         * 现在一次性在同一事务里补齐，前端重复调用也会因为「已经在车上」而跳过（幂等）。
+         */
+        List<BossRun> trip = comboTrip(run);
+        lockTrip(trip);
+
+        for (BossRun target : trip) {
+            if (memberRepository.findByRunIdAndCharacterId(target.getId(), character.getId()).isPresent()) {
+                continue;   // 幂等：已经在这条车次上了
+            }
+            ensureSingleCharacterPerPlayer(target.getId(), character.getId(), null);
+            long current = memberRepository.countByRunId(target.getId());
+            int capacity = target.getBoss().getCapacity();
+            if (current >= capacity) {
+                throw new BusinessException("「" + target.getBoss().getName() + "」这趟车已满 "
+                        + capacity + " 人，请先移除成员或调整该 BOSS 的人数上限");
+            }
+            RunMember member = new RunMember();
+            member.setRun(target);
+            member.setCharacter(character);
+            // 座位号取「当前最大值 + 1」，不能用人数 + 1（删过人后会与已有座位号重复）
+            member.setSlotNo(request.slotNo() == null ? nextSlotNo(target.getId()) : request.slotNo());
+            member.setRole(request.role() == null ? RunMember.Role.MEMBER : RunMember.Role.valueOf(request.role()));
+            member.setStatus(request.status() == null
+                    ? RunMember.Status.CONFIRMED
+                    : RunMember.Status.valueOf(request.status()));
+            member.setNote(request.note());
+            memberRepository.save(member);
+        }
+        return get(runId);
+    }
+
+    @Transactional
+    public RunView updateMember(Long memberId, MemberUpdateRequest request) {
+        RunMember member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new NotFoundException("席位不存在：" + memberId));
+        if (request.slotNo() != null) {
+            member.setSlotNo(request.slotNo());
+        }
+        if (request.role() != null) {
+            member.setRole(RunMember.Role.valueOf(request.role()));
+        }
+        if (request.status() != null) {
+            member.setStatus(RunMember.Status.valueOf(request.status()));
+        }
+        member.setNote(request.note());
+        memberRepository.save(member);
+        return get(member.getRun().getId());
+    }
+
+    @Transactional
+    public RunView removeMember(Long runId, Long memberId) {
+        RunMember member = memberRepository.findById(memberId).orElse(null);
+        if (member == null) {
+            // 幂等：融合车前端会逐个删成员车次上的席位，后面的已经不存在了
+            return get(runId);
+        }
+        Long characterId = member.getCharacter().getId();
+        List<BossRun> trip = comboTrip(member.getRun());
+        lockTrip(trip);
+        for (BossRun target : trip) {
+            memberRepository.findByRunIdAndCharacterId(target.getId(), characterId)
+                    .ifPresent(memberRepository::delete);
+        }
+        memberRepository.flush();
+        return get(runId);
+    }
+
+    /**
+     * 同一融合车「同一趟」的所有成员车次；非融合车只返回自己。
+     * 定位逻辑统一由 {@link ComboGuard} 提供，避免各条写路径各写一份后漂移。
+     */
+    private List<BossRun> comboTrip(BossRun run) {
+        return comboGuard.tripOf(run);
+    }
+
+    /** 锁住这一趟的所有车次（按 id 升序，避免死锁）。 */
+    private void lockTrip(List<BossRun> trip) {
+        if (trip.isEmpty()) {
+            return;
+        }
+        if (trip.size() == 1) {
+            runRepository.findByIdForUpdate(trip.get(0).getId());
+            return;
+        }
+        runRepository.findAllByIdForUpdate(trip.stream().map(BossRun::getId).sorted().toList());
+    }
+
+    /** 锁住多组车次（按 id 升序，避免与反向请求死锁）。 */
+    private void lockTrips(List<BossRun>... groups) {
+        java.util.TreeSet<Long> ids = new java.util.TreeSet<>();
+        for (List<BossRun> g : groups) {
+            for (BossRun r : g) {
+                ids.add(r.getId());
+            }
+        }
+        if (ids.size() == 1) {
+            runRepository.findByIdForUpdate(ids.first());
+        } else if (!ids.isEmpty()) {
+            runRepository.findAllByIdForUpdate(new java.util.ArrayList<>(ids));
+        }
+    }
+
+    /** 返回「源 / 目标」两趟车的最新视图。 */
+    private Map<String, RunView> viewPair(Long sourceRunId, Long targetRunId) {
+        Map<String, RunView> result = new LinkedHashMap<>();
+        result.put("source", get(sourceRunId));
+        result.put("target", get(targetRunId));
+        return result;
+    }
+
+    /** 在一组车次里找「同一个 BOSS」的那条。 */
+    private BossRun siblingOfBoss(List<BossRun> trip, Long bossId) {
+        return trip.stream().filter(r -> r.getBoss().getId().equals(bossId)).findFirst().orElse(null);
+    }    /** 下一个可用座位号（当前最大值 + 1）。 */
+    private int nextSlotNo(Long runId) {
+        Integer max = memberRepository.findMaxSlotNo(runId);
+        return max == null ? 1 : max + 1;
+    }
+
+    /**
+     * 有排班权限的账号可以动任意车次；否则只有这趟车上的群友本人可以。
+     *
+     * @param canSchedule 账号是否有 boss排班 权限（ADMIN 天然有）
+     */
+    @Transactional(readOnly = true)
+    public boolean canTouch(Long runId, boolean canSchedule, Long playerId) {
+        if (canSchedule) {
+            return true;
+        }
+        if (playerId == null) {
+            return false;
+        }
+        return memberRepository.findByRunIdOrderBySlotNoAscIdAsc(runId).stream()
+                .anyMatch(m -> m.getCharacter().getPlayer().getId().equals(playerId));
+    }
+
+    /** 群友标记自己所在车次的攻坚状态。 */
+    @Transactional
+    public RunView updateStatus(Long runId, String statusStr) {
+        BossRun run = runRepository.findById(runId).orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
+        BossRun.Status status;
+        try {
+            status = BossRun.Status.valueOf(statusStr == null ? "" : statusStr.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException("未知状态：" + statusStr);
+        }
+        /*
+         * 融合车「要打全打」：这一趟打完了就是 7 个 BOSS 一起打完。
+         * 只改一条会让「我的车次」里同一趟出现「戴米安已完成、其它待打」的错位，
+         * 车次一览表合并后也看不出到底算不算完成。
+         */
+        List<BossRun> trip = comboTrip(run);
+        for (BossRun target : trip) {
+            target.setStatus(status);
+        }
+        runRepository.saveAll(trip);
+        return get(runId);
+    }
+
+    /**
+     * 拖拽调车：把某个席位（角色）从它当前所在的车次挪到目标车次。
+     * 支持同 BOSS 换车，也支持跨 BOSS 调车；目标车次满员或该角色已在车上会被拒绝。
+     * 返回 { 源车次视图, 目标车次视图 }，前端据此刷新两趟车。
+     */
+    @Transactional
+    public Map<String, RunView> moveMember(Long runId, Long memberId, Long targetRunId, Integer slotNo) {
+        RunMember member = memberRepository.findById(memberId).orElse(null);
+        if (member == null) {
+            // 幂等：融合车前端会逐个成员车次调用，后面的已经挪走了
+            return viewPair(runId, targetRunId);
+        }
+        BossRun source = member.getRun();
+        if (source.getId().equals(targetRunId)) {
+            throw new BusinessException("已经在这趟车上了，不用拖动");
+        }
+        BossRun target = runRepository.findById(targetRunId)
+                .orElseThrow(() -> new NotFoundException("目标车次不存在：" + targetRunId));
+        GameCharacter character = member.getCharacter();
+
+        /*
+         * 融合车「要打全打」：把一个角色从第 1 趟挪到第 2 趟，
+         * 意味着它在 7 个成员 BOSS 上都要跟着挪。
+         * 以前只挪一条，前端循环补齐时中途失败就会留下「某个 BOSS 上多一个人」的脏数据。
+         */
+        String comboKey = source.getBoss().getComboKey();
+        boolean combo = comboKey != null && comboKey.equals(target.getBoss().getComboKey());
+        List<BossRun> sourceTrip = combo ? comboTrip(source) : List.of(source);
+        List<BossRun> targetTrip = combo ? comboTrip(target) : List.of(target);
+        lockTrips(sourceTrip, targetTrip);
+
+        // 锁后复核（findById 会命中一级缓存，用标量查询读库里的当前值）
+        Long currentRunId = memberRepository.findRunIdById(memberId).orElse(null);
+        if (currentRunId == null) {
+            return viewPair(runId, targetRunId);   // 已被并发挪走
+        }
+        if (!currentRunId.equals(source.getId())) {
+            throw new BusinessException("这个席位刚刚被挪到别的车次了，请刷新后重试");
+        }
+        entityManager.refresh(member);
+
+        for (BossRun src : sourceTrip) {
+            BossRun dst = combo ? siblingOfBoss(targetTrip, src.getBoss().getId()) : target;
+            if (dst == null) {
+                continue;
+            }
+            RunMember m = memberRepository.findByRunIdAndCharacterId(src.getId(), character.getId()).orElse(null);
+            if (m == null) {
+                continue;   // 幂等：这一条已经挪过了
+            }
+            if (memberRepository.findByRunIdAndCharacterId(dst.getId(), character.getId()).isPresent()) {
+                continue;   // 目标上已经有了
+            }
+            ensureSingleCharacterPerPlayer(dst.getId(), character.getId(), null);
+            long targetCount = memberRepository.countByRunId(dst.getId());
+            int capacity = dst.getBoss().getCapacity();
+            if (targetCount >= capacity) {
+                throw new BusinessException("「" + dst.getBoss().getName() + "」这趟车已满 "
+                        + capacity + " 人，调不过去");
+            }
+            m.setRun(dst);
+            m.setSlotNo(slotNo == null ? nextSlotNo(dst.getId()) : slotNo);
+            memberRepository.save(m);
+        }
+        memberRepository.flush();
+        return viewPair(runId, targetRunId);
+    }
+
+    /**
+     * 交换两个席位（换位）。
+     * 场景：同一个 BOSS 下，A 车有我的阴阳师、B 车有我的剑豪 —— 这两个角色不可能同时上同一个 BOSS，
+     * 所以把其中一个拖到另一个身上时，正确语义是「两人对调」，而不是「塞进 B 车」。
+     * 两个席位分别在两趟车上，交换后两边人数不变，因此不受容量限制。
+     * 返回两趟车的最新数据。
+     */
+    @Transactional
+    public Map<String, RunView> swapMembers(Long runId, Long memberId, Long otherMemberId) {
+        if (memberId.equals(otherMemberId)) {
+            throw new BusinessException("不能和自己换位");
+        }
+        RunMember a = memberRepository.findById(memberId).orElse(null);
+        RunMember b = memberRepository.findById(otherMemberId).orElse(null);
+        if (a == null || b == null) {
+            // 幂等：融合车前端会逐个成员车次调用，后面的已经换过了
+            return viewPair(runId, runId);
+        }
+        BossRun runA = a.getRun();
+        BossRun runB = b.getRun();
+        if (runA.getId().equals(runB.getId())) {
+            throw new BusinessException("两个角色已经在同一趟车上，不用换位");
+        }
+        // 必须是同一个 BOSS 的车次才允许换位（不同 BOSS 之间没有「不能同时上」的约束）
+        if (!runA.getBoss().getId().equals(runB.getBoss().getId())) {
+            throw new BusinessException("只能在同一 BOSS 的车次之间换位");
+        }
+
+        String comboKey = runA.getBoss().getComboKey();
+        boolean combo = comboKey != null && comboKey.equals(runB.getBoss().getComboKey());
+        List<BossRun> tripA = combo ? comboTrip(runA) : List.of(runA);
+        List<BossRun> tripB = combo ? comboTrip(runB) : List.of(runB);
+        lockTrips(tripA, tripB);
+
+        // 锁后复核：两个席位是否还在原来那两趟车上
+        Long runIdOfA = memberRepository.findRunIdById(memberId).orElse(null);
+        Long runIdOfB = memberRepository.findRunIdById(otherMemberId).orElse(null);
+        if (runIdOfA == null || runIdOfB == null) {
+            return viewPair(runId, runId);
+        }
+        if (!runIdOfA.equals(runA.getId()) || !runIdOfB.equals(runB.getId())) {
+            throw new BusinessException("这两个席位刚刚有变动，请刷新后重试");
+        }
+        entityManager.refresh(a);
+        entityManager.refresh(b);
+
+        // 融合车：第 1 趟 ↔ 第 2 趟的换位，要在 7 个成员 BOSS 上同时完成
+        for (BossRun ra : tripA) {
+            BossRun rb = combo ? siblingOfBoss(tripB, ra.getBoss().getId()) : runB;
+            if (rb == null) {
+                continue;
+            }
+            RunMember ma = memberRepository.findByRunIdAndCharacterId(ra.getId(), a.getCharacter().getId())
+                    .orElse(null);
+            RunMember mb = memberRepository.findByRunIdAndCharacterId(rb.getId(), b.getCharacter().getId())
+                    .orElse(null);
+            if (ma == null || mb == null) {
+                continue;   // 幂等：这一对已经换过了
+            }
+            ensureSingleCharacterPerPlayer(rb.getId(), ma.getCharacter().getId(), mb.getCharacter().getId());
+            ensureSingleCharacterPerPlayer(ra.getId(), mb.getCharacter().getId(), ma.getCharacter().getId());
+            int slotA = ma.getSlotNo();
+            int slotB = mb.getSlotNo();
+            ma.setRun(rb);
+            ma.setSlotNo(slotB);
+            mb.setRun(ra);
+            mb.setSlotNo(slotA);
+            memberRepository.save(ma);
+            memberRepository.save(mb);
+        }
+        memberRepository.flush();
+        /*
+         * 必须返回**两趟不同的车**（源车次与目标车次）。
+         * 之前这里返回的是 viewPair(runId, runId)（同一个 id 两次），
+         * 前端按 source/target 两个 id 去更新本地缓存时，第二个分支永远不成立，
+         * 于是只刷新了一趟车，另一趟还显示换位前的名单 —— 看起来就是「出现了两个相同的名字」，
+         * 手动刷新（重新拉全量）后才恢复正常。
+         */
+        return viewPair(runA.getId(), runB.getId());
+    }
+
+    /**
+     * 校验「同一趟车只能有一个自己的角色」。
+     * 规则来源：同一个 BOSS 你不可能用两个角色同时打，所以同一车次里
+     * 同一个群友（玩家）只能占一个席位 —— 哪怕角色不同也不行。
+     *
+     * @param allowCharacterId 允许保留的席位（换位时对方那个正在换出去的席位），可为 null
+     */
+    private void ensureSingleCharacterPerPlayer(Long runId, Long characterId, Long allowCharacterId) {
+        if (runId == null || characterId == null) {
+            return;
+        }
+        GameCharacter incoming = characterRepository.findById(characterId)
+                .orElseThrow(() -> new NotFoundException("角色不存在：" + characterId));
+        if (incoming.getPlayer() == null) {
+            return;
+        }
+        Long playerId = incoming.getPlayer().getId();
+        memberRepository.findByRunIdAndCharacterPlayerId(runId, playerId).stream()
+                .filter(m -> allowCharacterId == null || !allowCharacterId.equals(m.getCharacter().getId()))
+                .findFirst()
+                .ifPresent(existing -> {
+                    throw new BusinessException("「" + incoming.getPlayer().getNickname() + "」已经在这趟车上了（"
+                            + existing.getCharacter().getJob() + "）；同一个 BOSS 不能用两个角色同时打，"
+                            + "同一个人同一趟车只能上一个角色");
+                });
+    }
+
+    /**
+     * 校验难度是否属于该 BOSS 实际存在的难度，避免排出游戏里根本没有的难度。
+     */
+    private static BossTier requireAllowedTier(Boss boss, String tier) {
+        BossTier parsed = BossService.parseTier(tier);
+        List<String> allowed = BossService.tiersOf(boss);
+        if (!allowed.isEmpty() && parsed != BossTier.NONE && !allowed.contains(parsed.name())) {
+            throw new BusinessException("「" + boss.getName() + "」没有 "
+                    + parsed.label() + " 难度，可选：" + String.join(" / ",
+                    allowed.stream().map(name -> BossTier.valueOf(name).label()).toList()));
+        }
+        return parsed;
+    }
+
+    /** 这趟车我上了哪些角色。 */
+    @Transactional(readOnly = true)
+    public List<MemberView> myMembers(Long runId, Long playerId) {
+        if (playerId == null) {
+            return List.of();
+        }
+        return memberRepository.findByRunIdOrderBySlotNoAscIdAsc(runId).stream()
+                .filter(m -> playerId.equals(m.getCharacter().getPlayer().getId()))
+                .map(RunService::toMemberView)
+                .toList();
+    }
+
+    /** 整队保存：用给定角色列表替换这趟车的全部席位。 */
+    @Transactional
+    public RunView replaceMembers(Long runId, List<MemberRequest> requests) {
+        // 整队保存会先删后建，同样要锁车次，避免与「拖人上车」并发时互相覆盖
+        BossRun run = runRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NotFoundException("车次不存在：" + runId));
+        int capacity = run.getBoss().getCapacity();
+        if (requests != null && requests.size() > capacity) {
+            throw new BusinessException("这趟车最多 " + capacity + " 人，当前提交 " + requests.size() + " 人");
+        }
+        // 整队保存：同一批里不能出现同一个群友的两个角色
+        if (requests != null) {
+            Set<Long> seenPlayers = new LinkedHashSet<>();
+            for (MemberRequest request : requests) {
+                if (request == null || request.characterId() == null) {
+                    continue;
+                }
+                GameCharacter character = characterRepository.findById(request.characterId()).orElse(null);
+                if (character == null || character.getPlayer() == null) {
+                    continue;
+                }
+                if (!seenPlayers.add(character.getPlayer().getId())) {
+                    throw new BusinessException("「" + character.getPlayer().getNickname()
+                            + "」在这趟车里出现了两个角色；同一趟车只能上一个自己的角色");
+                }
+            }
+        }
+        /*
+         * 融合车「要打全打」：整队保存也要一次性应用到同一趟的每个成员 BOSS。
+         * 否则只有被编辑的那个 BOSS 换了名单，其它 6 个还是旧的，页面之间就会对不上。
+         */
+        List<BossRun> trip = comboTrip(run);
+        lockTrip(trip);
+
+        for (BossRun target : trip) {
+            memberRepository.deleteAll(memberRepository.findByRunIdOrderBySlotNoAscIdAsc(target.getId()));
+        }
+        // 必须立刻 flush：Hibernate 的刷写顺序是「先 insert 后 delete」，
+        // 不 flush 的话新席位会先插入，数据库触发器看到旧席位还在，会误判超员。
+        memberRepository.flush();
+        if (requests != null) {
+            Set<Long> seen = new LinkedHashSet<>();
+            List<MemberRequest> unique = new java.util.ArrayList<>();
+            for (MemberRequest request : requests) {
+                if (request == null || request.characterId() == null || !seen.add(request.characterId())) {
+                    continue;
+                }
+                unique.add(request);
+            }
+            for (BossRun target : trip) {
+                int slot = 0;
+                for (MemberRequest request : unique) {
+                    GameCharacter character = characterRepository.findById(request.characterId())
+                            .orElseThrow(() -> new NotFoundException("角色不存在：" + request.characterId()));
+                    RunMember member = new RunMember();
+                    member.setRun(target);
+                    member.setCharacter(character);
+                    member.setSlotNo(++slot);
+                    member.setRole(request.role() == null ? RunMember.Role.MEMBER : RunMember.Role.valueOf(request.role()));
+                    member.setStatus(request.status() == null
+                            ? RunMember.Status.CONFIRMED
+                            : RunMember.Status.valueOf(request.status()));
+                    member.setNote(request.note());
+                    memberRepository.save(member);
+                }
+            }
+        }
+        memberRepository.flush();
+        return get(runId);
+    }
+
+    /** 某个群友（账号）在哪些车次上。 */
+    @Transactional(readOnly = true)
+    public List<PlayerRunView> playerRuns(Long playerId) {
+        Map<Long, Integer> counts = new LinkedHashMap<>();
+        for (Object[] row : memberRepository.countGroupedByRun()) {
+            counts.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
+        }
+        List<RunMember> memberships = memberRepository.findByCharacterPlayerIdOrderByIdAsc(playerId);
+        return memberships.stream()
+                .map(m -> new PlayerRunView(
+                        m.getRun().getId(),
+                        m.getRun().getBoss().getId(),
+                        m.getRun().getBoss().getName(),
+                        m.getRun().getBoss().getGroup().getName(),
+                        m.getRun().getTier().name(),
+                        m.getRun().getRunIndex(),
+                        m.getRun().getScheduled(),
+                        m.getRun().getStatus().name(),
+                        counts.getOrDefault(m.getRun().getId(), 0),
+                        m.getRun().getBoss().getCapacity(),
+                        m.getCharacter().getId(),
+                        m.getCharacter().getJob(),
+                        m.getCharacter().getPower()))
+                .toList();
+    }
+
+    /** 批量组装车次视图，避免 N+1 查询。 */
+    private List<RunView> assemble(List<BossRun> runs) {
+        if (runs.isEmpty()) {
+            return List.of();
+        }
+        List<Long> runIds = runs.stream().map(BossRun::getId).toList();
+        Map<Long, List<RunMember>> membersByRun = memberRepository.findByRunIds(runIds).stream()
+                .collect(Collectors.groupingBy(m -> m.getRun().getId(), LinkedHashMap::new, Collectors.toList()));
+        List<RunView> result = new ArrayList<>(runs.size());
+        for (BossRun run : runs) {
+            List<MemberView> members = membersByRun.getOrDefault(run.getId(), List.of()).stream()
+                    .sorted(Comparator.comparingInt(RunMember::getSlotNo).thenComparing(RunMember::getId))
+                    .map(RunService::toMemberView)
+                    .toList();
+            int powerTotal = members.stream().mapToInt(MemberView::power).sum();
+            result.add(new RunView(
+                    run.getId(),
+                    run.getBoss().getId(),
+                    run.getBoss().getName(),
+                    run.getBoss().getIconKey(),
+                    run.getBoss().getGroup().getName(),
+                    run.getTier().name(),
+                    run.getTier().label(),
+                    run.getBoss().getCapacity(),
+                    run.getRunIndex(),
+                    run.getScheduled(),
+                    run.getStatus().name(),
+                    run.getNote(),
+                    members.size(),
+                    powerTotal,
+                    members));
+        }
+        return result;
+    }
+
+    private static MemberView toMemberView(RunMember member) {
+        GameCharacter character = member.getCharacter();
+        return new MemberView(
+                member.getId(),
+                character.getId(),
+                character.getPlayer().getId(),
+                character.getPlayer().getNickname(),
+                character.getJob(),
+                character.getPower(),
+                member.getSlotNo(),
+                member.getRole().name(),
+                member.getStatus().name(),
+                member.getNote(),
+                character.getNote(),
+                character.isMainChar());
+    }
+}

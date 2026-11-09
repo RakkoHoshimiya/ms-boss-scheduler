@@ -1,0 +1,27 @@
+[Unit]
+Description=GMSR BOSS 组队排班系统后端 (Spring Boot)
+Documentation=https://github.com/
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gmsr
+Group=gmsr
+WorkingDirectory=/opt/gmsr
+EnvironmentFile=/opt/gmsr/gmsr.env
+ExecStart=/usr/bin/java -XX:+UseSerialGC -XX:MaxMetaspaceSize=160m -Xms64m -Xmx384m -XX:TieredStopAtLevel=1 -Duser.timezone=Asia/Shanghai -Dfile.encoding=UTF-8 -jar /opt/gmsr/app/gmsr-scheduler.jar
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+# 日志交给 journald 统一管理（自带轮转，避免日志无限增长）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gmsr-backend
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

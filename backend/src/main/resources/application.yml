@@ -1,0 +1,118 @@
+server:
+  port: 18080
+  address: 127.0.0.1
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/css,application/javascript
+  shutdown: graceful
+
+spring:
+  application:
+    name: gmsr-scheduler
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # 专用 schema，避免与同库中的其它业务表混淆
+    url: ${GMSR_DB_URL:jdbc:postgresql://127.0.0.1:54233/gmsr?currentSchema=${GMSR_DB_SCHEMA:gmsr}}
+    username: ${GMSR_DB_USER:gmsr_app}
+    password: ${GMSR_DB_PASSWORD:gmsr_app_pwd}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: gmsr-pool
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 表结构由 Flyway 迁移管理（db/migration），启动时只校验实体与库是否一致。
+      # 任何结构变更都请新增 V2、V3……，不要再让 Hibernate 自动改表。
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: ${GMSR_DB_SCHEMA:gmsr}
+        jdbc:
+          time_zone: Asia/Shanghai
+          batch_size: 30
+        order_inserts: true
+        order_updates: true
+        format_sql: false
+  data:
+    redis:
+      # SA-Token 会话存储（与业务库无关，失败只影响登录态，不影响数据）
+      host: ${GMSR_REDIS_HOST:127.0.0.1}
+      port: ${GMSR_REDIS_PORT:6379}
+      password: ${GMSR_REDIS_PASSWORD:}
+      database: ${GMSR_REDIS_DB:1}
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # schema 由 Flyway 负责创建；history 表也放在这个 schema 里
+    schemas: ${GMSR_DB_SCHEMA:gmsr}
+    create-schemas: true
+    # 全新的空库：V1 会真的执行，把整套结构建出来。
+    # 已有的库：先用 mvn flyway:baseline 打一次基线（版本 1），
+    #   Flyway 就会认为 V1 已应用、直接跳过，不会重复建表。
+    # 不要打开 baseline-on-migrate：Flyway 11 不允许基线版本与迁移文件同版本共存。
+    baseline-on-migrate: false
+    baseline-version: 1
+    validate-on-migrate: true
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+sa-token:
+  # 会话数据统一存 Redis（1Panel 提供的 Redis，用 db 1 与面板自身数据隔离）
+  # access token 短命（2 小时），配合 /api/auth/refresh 做无感刷新；
+  # refresh token 7 天，期间只要用过一次就续期，7 天完全没动作才要求重新登录。
+  token-name: gmsr-token
+  timeout: 7200
+  active-timeout: 604800
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+  # 同源策略保持默认（未配置 CORS 时不校验）
+
+gmsr:
+  player:
+    # 群友账号初始密码（也是管理员重置后的密码），首次登录会要求修改
+    default-password: ${GMSR_PLAYER_PASSWORD:<DEFAULT_PLAYER_PASSWORD>}
+  admin:
+    username: ${GMSR_ADMIN_USER:admin}
+    password: ${GMSR_ADMIN_PASSWORD:<ADMIN_PASSWORD>}
+  # BOSS 头像目录（仅用于启动时的图标自检；开发机上不存在只会告警，不影响启动）
+  boss-icon-dir: ${GMSR_BOSS_ICON_DIR:/opt/1panel/www/gmsr/boss-icons}
+  # BOSS 语音频道（LiveKit）
+  voice:
+    enabled: ${GMSR_VOICE_ENABLED:false}
+    api-key: ${GMSR_VOICE_API_KEY:}
+    api-secret: ${GMSR_VOICE_API_SECRET:}
+    ws-url: ${GMSR_VOICE_WS_URL:}
+    token-hours: 6
+  security:
+    login:
+      # 连续失败次数达到该值后锁定，防止暴力破解
+      max-attempts: ${GMSR_LOGIN_MAX_ATTEMPTS:8}
+      # 单来源 IP 的阈值放宽，避免同一网络下互相影响
+      max-attempts-per-ip: ${GMSR_LOGIN_MAX_ATTEMPTS_PER_IP:30}
+      lock-minutes: ${GMSR_LOGIN_LOCK_MINUTES:15}
+  cors:
+    allowed-origins: ${GMSR_CORS:http://127.0.0.1:5173,http://localhost:5173}
+
+logging:
+  level:
+    root: INFO
+    com.gmsr: INFO
+    org.hibernate.SQL: WARN
