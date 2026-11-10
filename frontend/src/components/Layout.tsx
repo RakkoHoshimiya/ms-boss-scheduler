@@ -4,18 +4,20 @@ import { useAuth } from './AuthContext';
 import { useDevice } from './DeviceContext';
 import VoiceWidget from './VoiceWidget';
 import PasswordChangeModal from './PasswordChangeModal';
+import NavIcon from './NavIcon';
+import type { NavIconName } from './NavIcon';
 
 // 菜单只留图标 + 名称：名称已经足够说明用途，不再配一行解释文字。
-const NAV = [
+const NAV: { to: string; label: string; icon: NavIconName; hideForAdmin?: boolean; loginOnly?: boolean; scheduleOnly?: boolean }[] = [
   // 车次一览表放第一位：未登录默认展示这一页
-  { to: '/runs', label: '车次一览表', icon: '📋' },
-  { to: '/', label: '我的车次', icon: '🙋', hideForAdmin: true },
-  { to: '/my-characters', label: '我的信息', icon: '🧙', loginOnly: true },
-  { to: '/bosses', label: 'boss排班', icon: '🐉', scheduleOnly: true },
-  { to: '/voice', label: 'Boss语音频道', icon: '🎙️', loginOnly: true },
-  { to: '/players', label: '群友角色一览表', icon: '👥' },
-  { to: '/notes', label: '活动攻略与TIPS', icon: '📌', loginOnly: true },
-  { to: '/changelog', label: '更新记录', icon: '📝' },
+  { to: '/runs', label: '车次一览表', icon: 'runs' },
+  { to: '/notes', label: '活动攻略与TIPS', icon: 'guides', loginOnly: true },
+  { to: '/', label: '我的车次', icon: 'mine', hideForAdmin: true },
+  { to: '/my-characters', label: '我的信息', icon: 'profile', loginOnly: true },
+  { to: '/bosses', label: 'boss排班', icon: 'schedule', scheduleOnly: true },
+  { to: '/voice', label: 'Boss语音频道', icon: 'voice', loginOnly: true },
+  { to: '/players', label: '群友角色一览表', icon: 'players' },
+  { to: '/changelog', label: '更新记录', icon: 'changelog' },
 ];
 
 /** 首页会根据登录状态切换内容，菜单高亮也要跟着切换。 */
@@ -94,7 +96,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className={`app-shell ${isMobile ? 'is-mobile' : 'is-desktop'}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="logo">🌟</span>
+          <span className="logo nav-brand-mark"><NavIcon name="brand" /></span>
           <div>
             GMSR 组队排班
             <small>国际服冒险岛</small>
@@ -109,13 +111,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               end={item.to === '/'}
               className={({ isActive }) => navClass(item.to, isActive, user)}
             >
-              <span className="ico">{item.icon}</span>
+              <span className="ico"><NavIcon name={item.icon} /></span>
               <span className="txt">{item.label}</span>
             </NavLink>
           ))}
           {isAdmin ? (
-            <NavLink to="/admin" className="side-link">
-              <span className="ico">⚙️</span>
+            <NavLink to="/admin" className={({ isActive }) => isActive ? 'side-link active' : 'side-link'}>
+              <span className="ico"><NavIcon name="settings" /></span>
               <span className="txt">系统设置</span>
             </NavLink>
           ) : null}
@@ -173,7 +175,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       <div className="main-area">
         <div className="mobile-top">
-          <span className="logo">🌟</span>
+          <span className="logo nav-brand-mark"><NavIcon name="brand" /></span>
           <strong>GMSR 组队排班</strong>
           <div className="spacer" />
           {user ? (
@@ -207,7 +209,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             title="切回手机版（恢复按屏幕自动识别）"
             onClick={() => setPreference('auto')}
           >
-            📱 手机版
+            <NavIcon name="phone" /> 手机版
           </button>
         ) : null}
         <nav className="mobile-nav">
@@ -218,10 +220,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               end={item.to === '/'}
               className={({ isActive }) => navClassMobile(item.to, isActive, user)}
             >
-              {item.icon} {item.label}
+              <NavIcon name={item.icon} /><span>{item.label}</span>
             </NavLink>
           ))}
-          {isAdmin ? <NavLink to="/admin">⚙️ 设置</NavLink> : null}
+          {isAdmin ? <NavLink to="/admin"><NavIcon name="settings" /><span>设置</span></NavLink> : null}
         </nav>
         {showPasswordBanner && !forcePassword ? (
           <div className="notice">

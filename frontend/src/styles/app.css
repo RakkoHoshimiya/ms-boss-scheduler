@@ -3079,3 +3079,14 @@ code.qq {
 .modal .note-editor::placeholder { color: var(--text-dim); opacity: 1; }
 .note-pin-field { display: flex; align-items: center; gap: 8px; margin: 14px 0; color: var(--text); }
 .note-pin-field input { accent-color: var(--accent); margin: 0; }
+
+/* A consistent monochrome icon family for desktop and mobile navigation. */
+.nav-icon { display: inline-block; flex: 0 0 auto; vertical-align: middle; }
+.side-link .ico { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: inherit; }
+.side-link .nav-icon { width: 21px; height: 21px; }
+.side-link.active .ico { color: var(--accent); }
+.mobile-nav a { display: inline-flex; align-items: center; gap: 7px; }
+.mobile-nav .nav-icon { width: 17px; height: 17px; }
+.nav-brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #ffb54745; border-radius: 11px; background: #ffb54712; color: var(--accent); }
+.nav-brand-mark .nav-icon { width: 25px; height: 25px; }
+.layout-fab .nav-icon { margin-right: 4px; width: 17px; height: 17px; }
