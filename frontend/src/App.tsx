@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
 import MyRunsPage from './pages/MyRunsPage';
 import MyCharactersPage from './pages/MyCharactersPage';
+import NotesPage from './pages/NotesPage';
 import ChangelogPage from './pages/ChangelogPage';
 import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
@@ -91,6 +92,7 @@ export default function App() {
                   </RequireLogin>
                 }
               />
+              <Route path="/notes" element={<RequireLogin><NotesPage /></RequireLogin>} />
               <Route path="/changelog" element={<ChangelogPage />} />
               <Route path="/me" element={<Navigate to="/" replace />} />
               <Route

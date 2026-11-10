@@ -14,6 +14,7 @@ const NAV = [
   { to: '/bosses', label: 'boss排班', icon: '🐉', scheduleOnly: true },
   { to: '/voice', label: 'Boss语音频道', icon: '🎙️', loginOnly: true },
   { to: '/players', label: '群友角色一览表', icon: '👥' },
+  { to: '/notes', label: '活动便签', icon: '📌', loginOnly: true },
   { to: '/changelog', label: '更新记录', icon: '📝' },
 ];
 

@@ -50,6 +50,17 @@ class AuthzMatrixTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @org.junit.jupiter.api.BeforeEach
+    void forwardMockFilter() throws Exception {
+        // A mocked servlet filter otherwise swallows the request and returns a false 200.
+        org.mockito.Mockito.doAnswer(invocation -> {
+            new RoleHeaderFilter().doFilter(
+                invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
+            return null;
+        }).when(saTokenAuthFilter).doFilter(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
     /**
      * 按请求头装配身份：
      * {@code X-Test-Role: anon / viewer / scheduler / admin}。
@@ -93,6 +104,19 @@ class AuthzMatrixTest {
     /** 期望矩阵：method + path + 身份 + 期望状态码。 */
     private static Stream<Arguments> matrix() {
         return Stream.of(
+            Arguments.of("GET", "/api/notes", "anon", 401),
+            Arguments.of("GET", "/api/notes/1", "anon", 401),
+            Arguments.of("GET", "/api/notes/1/attachments/a", "anon", 401),
+            Arguments.of("POST", "/api/notes", "anon", 401),
+            Arguments.of("PUT", "/api/notes/1", "anon", 401),
+            Arguments.of("DELETE", "/api/notes/1", "anon", 401),
+            Arguments.of("GET", "/api/notes", "viewer", 200),
+            Arguments.of("GET", "/api/notes/1/attachments/a", "viewer", 200),
+            Arguments.of("POST", "/api/notes", "viewer", 200),
+            Arguments.of("PUT", "/api/notes/1", "viewer", 200),
+            Arguments.of("DELETE", "/api/notes/1", "viewer", 200),
+            Arguments.of("POST", "/api/notes/1/attachments", "viewer", 200),
+            Arguments.of("DELETE", "/api/notes/1/attachments/a", "viewer", 200),
             // ---------- 匿名可看：车次一览表所需 ----------
             Arguments.of("GET", "/api/runs", "anon", 200),
             Arguments.of("GET", "/api/runs/1", "anon", 200),
@@ -144,7 +168,7 @@ class AuthzMatrixTest {
             Arguments.of("POST", "/api/admin/runs/reset-status", "admin", 200),
 
             // ---------- 未知接口：一律拒绝（fail closed） ----------
-            Arguments.of("GET", "/api/unknown-endpoint", "anon", 403),
+            Arguments.of("GET", "/api/unknown-endpoint", "anon", 401),
             Arguments.of("GET", "/api/unknown-endpoint", "viewer", 403)
         );
     }

@@ -99,6 +99,7 @@ public class SecurityConfig {
 
                         // ---------- 以下一律要求登录（必须在任何 GET 放行之前） ----------
                         // 我的角色：服务层再校验只能改自己的
+                        .requestMatchers("/api/notes", "/api/notes/**").authenticated()
                         .requestMatchers("/api/me/**").authenticated()
                         // 语音频道
                         .requestMatchers("/api/voice/**").authenticated()

@@ -22,6 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 class AuthzMatrixProbeController {
 
+    @RequestMapping(value={"/notes", "/notes/{id}", "/notes/{id}/attachments", "/notes/{id}/attachments/{aid}"})
+    String notes() { return "ok"; }
+
     @GetMapping("/runs")
     List<String> runs() {
         return List.of();

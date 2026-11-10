@@ -120,9 +120,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}, retried = false): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, retried = false, blob = false): Promise<T> {
   const headers = new Headers(options.headers ?? {});
-  if (options.body && !headers.has('Content-Type')) {
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   const token = getToken();
@@ -137,7 +137,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     // 用户完全无感知；只有 refresh token 也过期（连续 7 天没用过系统）才会真正掉线。
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      return request<T>(path, options, true);
+      return request<T>(path, options, true, blob);
     }
     clearTokens();
     onUnauthorized?.();
@@ -149,6 +149,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
   if (response.status === 204) {
     return undefined as T;
   }
+  if (blob && response.ok) return await response.blob() as T;
   const text = await response.text();
   const payload = text ? safeParse(text) : null;
   if (!response.ok) {
@@ -343,4 +344,17 @@ export const api = {
   deleteUser: (id: number) => request<void>(`/admin/users/${id}`, { method: 'DELETE' }),
   resetUserPassword: (id: number) =>
     request<{ username: string; defaultPassword: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' }),
+};
+
+export interface GuideNote { id: number; title: string; content: string; pinned: boolean; updatedAt: string }
+export interface NoteAttachment { id: string; name: string; size: number; mediaType: string }
+export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
+export const notesApi = {
+ list: () => request<GuideNote[]>('/notes'),
+ detail: (id: number) => request<NoteDetail>(`/notes/${id}`),
+ save: (note: Partial<GuideNote>) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
+ remove: (id: number) => request<void>(`/notes/${id}`, {method:'DELETE'}),
+ upload: (id: number, file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>(`/notes/${id}/attachments`, {method:'POST',body}); },
+ file: (id: number, aid: string) => request<Blob>(`/notes/${id}/attachments/${aid}`, {}, false, true),
+ removeFile: (id: number, aid: string) => request<void>(`/notes/${id}/attachments/${aid}`, {method:'DELETE'}),
 };

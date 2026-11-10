@@ -7,6 +7,10 @@ server:
   shutdown: graceful
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
   application:
     name: gmsr-scheduler
   threads:
@@ -86,6 +90,8 @@ sa-token:
   # 同源策略保持默认（未配置 CORS 时不校验）
 
 gmsr:
+  notes:
+    directory: ${GMSR_NOTES_DIRECTORY:./data/note-attachments}
   player:
     # 群友账号初始密码（也是管理员重置后的密码），首次登录会要求修改
     default-password: ${GMSR_PLAYER_PASSWORD:<DEFAULT_PLAYER_PASSWORD>}
