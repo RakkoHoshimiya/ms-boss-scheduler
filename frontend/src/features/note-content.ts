@@ -1,8 +1,6 @@
 export type NoteBlock = { key: string; kind: 'text'; text: string } | { key: string; kind: 'image'; attachmentId: string };
-export interface NoteCursor { key: string; start: number; end: number }
 let sequence = 0;
 const key = () => `note-block-${++sequence}`;
-export const imageMarker = (id: string) => `[[image:${id}]]`;
 
 export function parseNoteContent(content: string): NoteBlock[] {
   const result: NoteBlock[] = [];
@@ -16,27 +14,33 @@ export function parseNoteContent(content: string): NoteBlock[] {
   result.push({ key: key(), kind: 'text', text: content.slice(offset) });
   return result;
 }
-export function serializeNoteContent(blocks: NoteBlock[]): string {
-  return blocks.map(block => block.kind === 'text' ? block.text : imageMarker(block.attachmentId)).join('');
-}
 export function noteSummary(content: string): string {
   return content.replace(/\[\[image:[a-zA-Z0-9-]+\]\]/g, ' [图片] ');
 }
-export function insertNoteImage(blocks: NoteBlock[], cursor: NoteCursor | null, attachmentId: string): NoteBlock[] {
-  const target = blocks.find(block => block.key === cursor?.key && block.kind === 'text') ?? [...blocks].reverse().find(block => block.kind === 'text');
-  if (!target || target.kind !== 'text') return blocks;
-  const start = Math.min(target.text.length, cursor?.key === target.key ? cursor.start : target.text.length);
-  const end = Math.min(target.text.length, cursor?.key === target.key ? cursor.end : target.text.length);
-  const result = blocks.flatMap<NoteBlock>(block => {
-    if (block.key !== target.key) return block.kind === 'image' && block.attachmentId === attachmentId ? [] : [block];
-    return [
-      { key: target.key, kind: 'text', text: target.text.slice(0, start) },
-      { key: key(), kind: 'image', attachmentId },
-      { key: key(), kind: 'text', text: target.text.slice(end) },
-    ];
-  });
-  return result;
-}
-export function detachNoteImage(blocks: NoteBlock[], attachmentId: string): NoteBlock[] {
-  return parseNoteContent(serializeNoteContent(blocks.filter(block => block.kind !== 'image' || block.attachmentId !== attachmentId)));
+
+
+/** Read only text, line breaks and our own images; never persist pasted HTML. */
+export function readNoteDocument(root: HTMLElement, imageIds: ReadonlySet<string>): string {
+  function read(parent: Node): string {
+    let text = '';
+    const children = Array.from(parent.childNodes);
+    children.forEach((node, index) => {
+      if (node.nodeType === 3) { text += node.textContent ?? ''; return; }
+      if (node.nodeType !== 1) return;
+      const element = node as HTMLElement;
+      if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT'].includes(element.tagName)) return;
+      if (element.tagName === 'IMG') {
+        const id = element.dataset.noteImage;
+        if (id && imageIds.has(id)) text += `[[image:${id}]]`;
+        return;
+      }
+      if (element.tagName === 'BR') { text += '\n'; return; }
+      const block = ['DIV', 'P', 'LI', 'H1', 'H2', 'H3', 'BLOCKQUOTE'].includes(element.tagName);
+      if (block && index > 0 && !text.endsWith('\n')) text += '\n';
+      text += read(element);
+      if (block && index < children.length - 1 && !text.endsWith('\n')) text += '\n';
+    });
+    return text;
+  }
+  return read(root);
 }

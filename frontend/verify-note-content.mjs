@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict';
-import { parseNoteContent, serializeNoteContent, insertNoteImage, detachNoteImage, noteSummary } from './src/features/note-content.ts';
+import { JSDOM } from 'jsdom';
+import { parseNoteContent, readNoteDocument, noteSummary } from './src/features/note-content.ts';
+const dom = new JSDOM('<div></div>');
+const root = dom.window.document.querySelector('div');
 for (const content of ['', 'line 1\nline 2', 'before[[image:a]]after', '[[image:a]][[image:b]]', '<script>alert(1)</script>']) {
-  assert.equal(serializeNoteContent(parseNoteContent(content)), content);
+  root.replaceChildren();
+  for (const block of parseNoteContent(content)) {
+    if (block.kind === 'text') root.append(dom.window.document.createTextNode(block.text));
+    else { const image = dom.window.document.createElement('img'); image.dataset.noteImage = block.attachmentId; root.append(image); }
+  }
+  assert.equal(readNoteDocument(root, new Set(['a','b'])), content);
+  assert.equal(root.querySelector('script'), null);
 }
-const blocks = parseNoteContent('beforeafter');
-const inserted = insertNoteImage(blocks, { key: blocks[0].key, start: 6, end: 6 }, 'a');
-assert.equal(serializeNoteContent(inserted), 'before[[image:a]]after');
-assert.equal(serializeNoteContent(detachNoteImage(inserted, 'a')), 'beforeafter');
-const moved = insertNoteImage(inserted, { key: inserted[2].key, start: 5, end: 5 }, 'a');
-assert.equal(serializeNoteContent(moved), 'beforeafter[[image:a]]');
+root.innerHTML = 'hello<div><br></div><div>world</div>';
+assert.equal(readNoteDocument(root, new Set()), 'hello\n\nworld');
+root.innerHTML = '<p>safe <b>text</b></p><script>bad()</script><img src="https://external.invalid/a.png"><img data-note-image="forged">';
+assert.equal(readNoteDocument(root, new Set()).trim(), 'safe text');
 assert.equal(noteSummary('before[[image:a]]after'), 'before [图片] after');
-console.log('NOTE_CONTENT_PASS: round-trip, cursor insertion, move, detach and summaries');
+console.log('NOTE_CONTENT_PASS: continuous document round-trip, line breaks and safe serialization');
+dom.window.close();

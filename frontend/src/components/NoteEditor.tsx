@@ -1,62 +1,57 @@
 import { useRef, useState } from 'react';
 import { notesApi, type GuideNote, type NoteDetail, type NoteAttachment } from '../api/client';
-import { parseNoteContent, serializeNoteContent, insertNoteImage, detachNoteImage, type NoteCursor } from '../features/note-content';
+import { parseNoteContent } from '../features/note-content';
+import NoteRichText, { type NoteRichTextHandle } from './NoteRichText';
 import NoteAttachmentPreview from './NoteAttachmentPreview';
 import Modal from './Modal';
 
 export default function NoteEditor({ initial, onSaved, onClose }: { initial?: NoteDetail; onSaved: (note: GuideNote) => void; onClose: () => void }) {
   const [title, setTitle] = useState(initial?.note.title ?? '');
   const [pinned, setPinned] = useState(initial?.note.pinned ?? false);
-  const [blocks, setBlocks] = useState(() => parseNoteContent(initial?.note.content ?? ''));
+  const [content, setContent] = useState(initial?.note.content ?? '');
   const [files, setFiles] = useState<NoteAttachment[]>(initial?.attachments ?? []);
+  const initialInline = new Set(parseNoteContent(initial?.note.content ?? '').flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+  const [footerIds, setFooterIds] = useState(() => new Set((initial?.attachments ?? []).filter(file => !initialInline.has(file.id)).map(file => file.id)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState('');
-  const cursor = useRef<NoteCursor | null>(null);
+  const editor = useRef<NoteRichTextHandle>(null);
   const staged = useRef(new Set<string>());
-  const content = serializeNoteContent(blocks);
-  const inline = new Set(blocks.flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+  const inlineIds = new Set(parseNoteContent(content).flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+  const usedFiles = files.filter(file => inlineIds.has(file.id) || footerIds.has(file.id));
+  const footer = files.filter(file => footerIds.has(file.id));
 
-  function insert(file: NoteAttachment) {
-    setBlocks(current => insertNoteImage(current, cursor.current, file.id));
-    cursor.current = null;
-  }
-  async function upload(selected: FileList | null, placement: 'inline' | 'footer') {
-    if (!selected?.length || busy) return;
-    const incoming = Array.from(selected);
-    if (files.length + incoming.length > 12) { setError('每张便签最多 12 个附件'); return; }
+  async function upload(incoming: File[], placement: 'inline' | 'footer') {
+    if (!incoming.length || busy) return;
+    if (usedFiles.length + incoming.length > 12) { setError('每张便签最多 12 个附件'); return; }
     if (incoming.some(file => file.size === 0 || file.size > 20 * 1024 * 1024)) { setError('单个附件须大于 0 且不超过 20 MB'); return; }
     setBusy(true); setError('');
     try {
-      let currentBlocks = blocks;
-      let at = cursor.current;
       for (const [index, file] of incoming.entries()) {
         setProgress(`正在上传 ${index + 1}/${incoming.length}：${file.name}`);
         const attachment = await notesApi.stage(file);
         staged.current.add(attachment.id);
         setFiles(current => [...current, attachment]);
-        if (placement === 'inline') {
-          if (!attachment.mediaType.startsWith('image/')) {
-            setError('这类图片暂不支持正文预览，已放入底部附件。PNG、JPG、GIF 可插入正文。');
-          } else {
-            currentBlocks = insertNoteImage(currentBlocks, at, attachment.id);
-            setBlocks(currentBlocks);
-            const imageIndex = currentBlocks.findIndex(block => block.kind === 'image' && block.attachmentId === attachment.id);
-            at = { key: currentBlocks[imageIndex + 1].key, start: 0, end: 0 };
-            cursor.current = at;
-          }
+        if (placement === 'inline' && attachment.mediaType.startsWith('image/')) editor.current?.insertImage(attachment, file);
+        else {
+          setFooterIds(current => new Set([...current, attachment.id]));
+          if (placement === 'inline') setError('这张图片暂不支持正文显示，已放入底部附件。请使用 PNG、JPG 或 GIF。');
         }
       }
-    } catch (e) { setError(`上传未完成：${(e as Error).message}。已上传的文件会保留，可重试剩余文件。`); }
+    } catch (e) { setError(`上传未完成：${(e as Error).message}。已上传的内容会保留。`); }
     finally { setBusy(false); setProgress(''); }
   }
-  async function removeFile(file: NoteAttachment) {
+  function insertFooter(file: NoteAttachment) {
+    editor.current?.insertImage(file);
+    setFooterIds(current => { const next = new Set(current); next.delete(file.id); return next; });
+  }
+  async function removeFooter(file: NoteAttachment) {
     if (busy) return;
     setBusy(true); setError('');
     try {
       if (staged.current.has(file.id)) { await notesApi.discard(file.id); staged.current.delete(file.id); }
+      setFooterIds(current => { const next = new Set(current); next.delete(file.id); return next; });
       setFiles(current => current.filter(item => item.id !== file.id));
-      setBlocks(current => detachNoteImage(current, file.id)); cursor.current = null;
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
@@ -64,15 +59,19 @@ export default function NoteEditor({ initial, onSaved, onClose }: { initial?: No
     if (busy) return;
     if ((title.trim() || content.trim() || files.length) && !confirm('放弃本次编辑？尚未保存的内容和新上传的附件将被丢弃。')) return;
     setBusy(true);
-    // Failed cleanup is retried by the server's temporary-file cleanup job.
     await Promise.allSettled([...staged.current].map(id => notesApi.discard(id)));
     onClose();
   }
   async function save() {
     if (busy) return;
+    const documentContent = editor.current?.read() ?? content;
+    const inDocument = new Set(parseNoteContent(documentContent).flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+    const selected = files.filter(file => footerIds.has(file.id) || inDocument.has(file.id));
     setBusy(true); setError('');
     try {
-      const note = await notesApi.save({ id: initial?.note.id, title, content, pinned, attachmentIds: files.map(file => file.id) });
+      const note = await notesApi.save({ id: initial?.note.id, title, content: documentContent, pinned, attachmentIds: selected.map(file => file.id) });
+      const attached = new Set(selected.map(file => file.id));
+      await Promise.allSettled([...staged.current].filter(id => !attached.has(id)).map(id => notesApi.discard(id)));
       staged.current.clear(); onSaved(note);
     } catch (e) { setError((e as Error).message); setBusy(false); }
   }
@@ -82,36 +81,22 @@ export default function NoteEditor({ initial, onSaved, onClose }: { initial?: No
   </>}>
     <fieldset className="note-editor-fields" disabled={busy}>
       <label className="field"><span>标题</span><input type="text" maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></label>
-      <div className="note-editor-toolbar">
-        <label className="note-upload-button">＋ 插入正文图片<input aria-label="插入正文图片" type="file" multiple accept=".png,.jpg,.jpeg,.gif" onChange={e => { void upload(e.target.files, 'inline'); e.target.value = ''; }} /></label>
-        <label className="note-upload-button secondary">＋ 添加底部附件<input aria-label="添加底部附件" type="file" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.zip" onChange={e => { void upload(e.target.files, 'footer'); e.target.value = ''; }} /></label>
+      <div className="note-editor-toolbar" onMouseDown={() => editor.current?.remember()}>
+        <label className="note-upload-button">＋ 插入图片<input aria-label="插入正文图片" type="file" multiple accept=".png,.jpg,.jpeg,.gif" onChange={e => { void upload(Array.from(e.target.files ?? []), 'inline'); e.target.value = ''; }} /></label>
+        <label className="note-upload-button secondary">＋ 添加附件<input aria-label="添加底部附件" type="file" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.zip" onChange={e => { void upload(Array.from(e.target.files ?? []), 'footer'); e.target.value = ''; }} /></label>
       </div>
-      <p className="muted note-editor-help">先在文字中点选位置，再插入图片。图片前后都可以继续写攻略；底部附件会集中显示在详情末尾。</p>
-      <div className="note-block-editor" aria-label="攻略与提示">
-        {blocks.map((block, index) => block.kind === 'text' ? <label className="field note-text-block" key={block.key}>
-          <span>{index === 0 ? '攻略与提示' : '继续写攻略'}</span>
-          <textarea className="note-editor" rows={blocks.length === 1 ? 8 : 3} aria-label={index === 0 ? '攻略与提示' : `图片后的文字 ${index}`} placeholder="在这里写攻略内容…" value={block.text} maxLength={50000}
-            onChange={e => setBlocks(current => current.map(item => item.key === block.key ? { ...block, text: e.target.value } : item))}
-            onSelect={e => { cursor.current = { key: block.key, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; }}
-            onFocus={e => { cursor.current = { key: block.key, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; }} />
-        </label> : <figure className="note-inline-editor" key={block.key}>
-          {files.find(file => file.id === block.attachmentId) && <NoteAttachmentPreview file={files.find(file => file.id === block.attachmentId)!} />}
-          <figcaption><span>正文图片</span><button type="button" className="btn small" onClick={() => { setBlocks(current => detachNoteImage(current, block.attachmentId)); cursor.current = null; }}>改为底部附件</button></figcaption>
-        </figure>)}
-      </div>
-      <h3 className="note-asset-heading">已上传文件 <small>{files.length}/12</small></h3>
-      {files.length === 0 ? <p className="muted">还没有图片或附件，可以直接在上方添加。</p> : <div className="note-asset-list">{files.map(file => <div className="note-asset-row" key={file.id}>
+      <label className="field note-rich-label"><span>正文</span></label>
+      <NoteRichText ref={editor} initialContent={initial?.note.content ?? ''} initialFiles={initial?.attachments ?? []} disabled={busy} onChange={setContent} onError={setError} onUpload={incoming => { void upload(incoming, 'inline'); }} />
+      {footer.length > 0 && <section className="note-footer-editor"><h3>底部附件</h3>{footer.map(file => <div className="note-asset-row" key={file.id}>
         <NoteAttachmentPreview file={file} compact />
-        <span className="note-placement">{inline.has(file.id) ? '正文图片' : '底部附件'}</span>
-        <div className="note-asset-actions">
-          {file.mediaType.startsWith('image/') && <button type="button" className="btn small" onClick={() => insert(file)}>{inline.has(file.id) ? '移至光标处' : '插入正文'}</button>}
-          {inline.has(file.id) && <button type="button" className="btn small" onClick={() => { setBlocks(current => detachNoteImage(current, file.id)); cursor.current = null; }}>作为附件</button>}
-          <button type="button" className="btn small" onClick={() => removeFile(file)}>移除</button>
+        <div className="note-asset-actions" onMouseDown={() => editor.current?.remember()}>
+          {file.mediaType.startsWith('image/') && <button type="button" className="btn small" onClick={() => insertFooter(file)}>插入正文</button>}
+          <button type="button" className="btn small" onClick={() => removeFooter(file)}>移除</button>
         </div>
-      </div>)}</div>}
+      </div>)}</section>}
       <label className="note-pin-field"><input type="checkbox" checked={pinned} onChange={e => setPinned(e.target.checked)} />置顶提醒</label>
     </fieldset>
-    <p className="muted">单个附件最大 20 MB，每张便签最多 12 个。上传后点击发布或保存，内容才会对大家更新。</p>
+    <p className="muted note-upload-limit">{usedFiles.length}/12 个文件 · 单个最大 20 MB</p>
     {progress && <p role="status">{progress}</p>}
     {content.length > 50000 && <p className="note-error">内容超出 50,000 字符，请缩短后保存。</p>}
     {error && <p className="note-error" role="alert">{error}</p>}
