@@ -1,0 +1,55 @@
+import { JSDOM } from 'jsdom';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/#/notes',pretendToBeVisual:true});
+const w=dom.window;w.__GMSR_SKIP_VOICE__=true;
+for(const k of ['window','document','localStorage','location','history','Node','Element','HTMLElement','MutationObserver','Event'])globalThis[k]=k==='window'?w:w[k];
+Object.defineProperty(globalThis,'navigator',{value:w.navigator,configurable:true});
+globalThis.getComputedStyle=w.getComputedStyle.bind(w);globalThis.requestAnimationFrame=cb=>setTimeout(cb,0);globalThis.cancelAnimationFrame=clearTimeout;
+globalThis.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
+localStorage.setItem('gmsr.token','test');
+
+globalThis.confirm=()=>true;
+let notes=[];let stored=[];let stages=0;let writes=0;let failUpload=false;
+globalThis.fetch=async(url,opts={})=>{
+ let body={};
+ if(url==='/api/auth/me')body={id:7,username:'test',displayName:'测试用户',role:'VIEWER'};
+ else if(url==='/api/notes/attachments' && opts.method==='POST') {
+  if(failUpload)return new Response(JSON.stringify({message:'test upload failure'}),{status:503});
+  stages++;body={id:'image'+stages,name:'image'+stages+'.png',size:128,mediaType:'image/png'};stored.push(body);
+ } else if(url.startsWith('/api/notes/attachments/')) return new Response('image bytes',{status:200});
+ else if((url==='/api/notes' && opts.method==='POST') || (url==='/api/notes/1' && opts.method==='PUT')) {
+  writes++;body={...JSON.parse(opts.body),id:1,updatedAt:new Date().toISOString()};notes=[body];
+ } else if(url==='/api/notes')body=notes;
+ else if(url==='/api/notes/1')body={note:notes[0],attachments:stored.filter(f=>notes[0].attachmentIds.includes(f.id))};
+ else if(url==='/api/client-info')body={mobile:false};
+ return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+};
+w.fetch=globalThis.fetch;
+const assets=new URL('./dist/assets/',import.meta.url);
+const bundle=fs.readdirSync(assets).find(x=>/^index-.*\.js$/.test(x));await import(new URL(bundle,assets));
+const wait=()=>new Promise(r=>setTimeout(r,130));await wait();await wait();
+const button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text);
+const input=(el,value)=>{const proto=el.tagName==='TEXTAREA'?w.HTMLTextAreaElement.prototype:w.HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,value);el.dispatchEvent(new w.Event('input',{bubbles:true}));};
+const attach=async(label)=>{const element=document.querySelector('input[aria-label="'+label+'"]');Object.defineProperty(element,'files',{value:[new File(['image'],'a.png',{type:'image/png'})],configurable:true});element.dispatchEvent(new w.Event('change',{bubbles:true}));await wait();await wait();};
+button('＋ 发布便签').click();await wait();
+assert(document.querySelector('input[aria-label="插入正文图片"]'));
+input(document.querySelector('.modal input[type="text"]'),'图文攻略');
+input(document.querySelector('.note-editor'),'beforeafter');await wait();
+const text=document.querySelector('.note-editor');text.focus();text.setSelectionRange(6,6);text.dispatchEvent(new w.Event('select',{bubbles:true}));await wait();
+await attach('插入正文图片');
+assert.equal(writes,0,'Uploading must not publish a note');
+assert.equal(document.querySelectorAll('.note-inline-editor').length,1);
+assert.deepEqual([...document.querySelectorAll('.note-editor')].map(x=>x.value),['before','after']);
+await attach('添加底部附件');assert.equal(stages,2);assert.equal(document.querySelectorAll('.note-inline-editor').length,1);
+failUpload=true;await attach('添加底部附件');assert(document.querySelector('[role="alert"]').textContent.includes('上传未完成'));assert.equal(writes,0);failUpload=false;
+button('发布便签').click();await wait();await wait();
+assert.equal(writes,1);assert.equal(notes[0].content,'before[[image:image1]]after');assert.deepEqual(notes[0].attachmentIds,['image1','image2']);
+assert.equal(document.querySelectorAll('.note-content img').length,1);assert.equal(document.querySelectorAll('.note-footer-attachments img').length,1);
+assert.equal(document.querySelector('.note-content img').alt,'image1.png');assert.equal(document.querySelector('.note-footer-attachments img').alt,'image2.png');
+button('编辑').click();await wait();button('改为底部附件').click();await wait();button('保存修改').click();await wait();await wait();
+assert.equal(document.querySelectorAll('.note-content img').length,0);assert.equal(document.querySelectorAll('.note-footer-attachments img').length,2);
+assert.equal(notes[0].content,'beforeafter');
+button('编辑').click();await wait();input(document.querySelector('.modal input[type="text"]'),'未保存修改');await wait();button('取消').click();await wait();assert.equal(notes[0].title,'图文攻略');
+console.log('NOTE_COMPOSE_PASS: pre-publish uploads, cursor insertion, footer placement, failure preservation, publish, edit and cancel');
+dom.window.close();process.exit(0);

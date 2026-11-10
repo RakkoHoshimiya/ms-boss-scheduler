@@ -352,9 +352,11 @@ export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
 export const notesApi = {
  list: () => request<GuideNote[]>('/notes'),
  detail: (id: number) => request<NoteDetail>(`/notes/${id}`),
- save: (note: Partial<GuideNote>) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
+ save: (note: Partial<GuideNote> & { attachmentIds?: string[] }) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
  remove: (id: number) => request<void>(`/notes/${id}`, {method:'DELETE'}),
  upload: (id: number, file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>(`/notes/${id}/attachments`, {method:'POST',body}); },
- file: (id: number, aid: string) => request<Blob>(`/notes/${id}/attachments/${aid}`, {}, false, true),
+ stage: (file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>('/notes/attachments', {method:'POST',body}); },
+ file: (aid: string) => request<Blob>(`/notes/attachments/${aid}`, {}, false, true),
+ discard: (aid: string) => request<void>(`/notes/attachments/${aid}`, {method:'DELETE'}),
  removeFile: (id: number, aid: string) => request<void>(`/notes/${id}/attachments/${aid}`, {method:'DELETE'}),
 };

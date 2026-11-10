@@ -1,31 +1,69 @@
 import { useEffect, useState } from 'react';
-import { notesApi, type GuideNote, type NoteDetail, type NoteAttachment } from '../api/client';
+import { notesApi, type GuideNote, type NoteDetail } from '../api/client';
+import { parseNoteContent, noteSummary } from '../features/note-content';
 import Modal from '../components/Modal';
+import NoteEditor from '../components/NoteEditor';
+import NoteAttachmentPreview from '../components/NoteAttachmentPreview';
 
-function Attachment({ noteId, file, remove }: { noteId: number; file: NoteAttachment; remove: () => void }) {
- const [url,setUrl]=useState(''); const [error,setError]=useState('');
- const image=file.mediaType.startsWith('image/');
- useEffect(()=>{ if(!image) return; let active=true; let objectUrl=''; notesApi.file(noteId,file.id).then(b=>{objectUrl=URL.createObjectURL(b); if(active)setUrl(objectUrl); else URL.revokeObjectURL(objectUrl);}).catch(e=>{if(active)setError(e.message);}); return ()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);}; },[noteId,file.id,image]);
- async function download() { try { const blob=await notesApi.file(noteId,file.id); const u=URL.createObjectURL(blob); const a=document.createElement('a');a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000); } catch(e){setError((e as Error).message);} }
- return <div className="note-attachment">{url && <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={file.name}/></a>}<div><button className="btn" onClick={download}>{file.name} · {(file.size/1024).toFixed(0)} KB ↓</button><button className="btn" onClick={remove}>移除</button></div>{error && <p role="alert">{error}</p>}</div>;
+function NoteBody({ detail }: { detail: NoteDetail }) {
+  const blocks = parseNoteContent(detail.note.content);
+  const inline = new Set(blocks.flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+  const footer = detail.attachments.filter(file => !inline.has(file.id));
+  return <>
+    <div className="note-content">{blocks.map(block => {
+      if (block.kind === 'text') return <div className="note-body-text" key={block.key}>{block.text}</div>;
+      const file = detail.attachments.find(item => item.id === block.attachmentId);
+      return file ? <figure className="note-body-image" key={block.key}><NoteAttachmentPreview file={file} /></figure> : <p className="muted" key={block.key}>这张图片已被移除。</p>;
+    })}</div>
+    {footer.length > 0 && <section className="note-footer-attachments"><h3>附件 <small>{footer.length}</small></h3><div className="note-files">{footer.map(file => <NoteAttachmentPreview key={file.id} file={file} />)}</div></section>}
+  </>;
 }
+
 export default function NotesPage() {
- const [notes,setNotes]=useState<GuideNote[]>([]); const [loading,setLoading]=useState(true); const [query,setQuery]=useState('');
- const [detail,setDetail]=useState<NoteDetail|null>(null); const [draft,setDraft]=useState<Partial<GuideNote>|null>(null); const [busy,setBusy]=useState(false); const [error,setError]=useState('');
- const fail=(e:unknown)=>setError((e as Error).message);
- async function load(){setNotes(await notesApi.list());}
- useEffect(()=>{load().catch(fail).finally(()=>setLoading(false));},[]);
- async function open(id:number){setBusy(true);setError('');try{setDetail(await notesApi.detail(id));}catch(e){fail(e);}finally{setBusy(false);}}
- async function save(){if(!draft)return;setBusy(true);setError('');try{const n=await notesApi.save(draft);setDraft(null);setDetail(await notesApi.detail(n.id));await load();}catch(e){fail(e);}finally{setBusy(false);}}
- async function remove(){if(!detail || !confirm('删除这张便签及全部附件？此操作无法撤销。'))return;setBusy(true);try{await notesApi.remove(detail.note.id);setDetail(null);await load();}catch(e){fail(e);}finally{setBusy(false);}}
- async function pin(){if(!detail)return;setBusy(true);try{const n=await notesApi.save({...detail.note,pinned:!detail.note.pinned});setDetail({...detail,note:n});await load();}catch(e){fail(e);}finally{setBusy(false);}}
- async function upload(files:FileList|null){if(!detail||!files)return;setBusy(true);setError('');try{for(const file of Array.from(files))await notesApi.upload(detail.note.id,file);}catch(e){fail(e);}finally{try{setDetail(await notesApi.detail(detail.note.id));}catch(e){fail(e);}setBusy(false);}}
- const filtered=notes.filter(n=>(n.title+' '+n.content).toLowerCase().includes(query.toLowerCase()));
- return <div className="notes-page"><header className="notes-header"><div><span className="notes-eyebrow">SEASON FIELD NOTES</span><h1>活动攻略与TIPS</h1><p className="muted">攻略、活动提醒与容易错过的小细节，一起记在这里。</p></div><button className="btn primary" disabled={busy} onClick={()=>{setError('');setDraft({title:'',content:'',pinned:false});}}>＋ 发布便签</button></header>
- {error && <p className="note-error" role="alert">{error}</p>}
- <input type="text" className="notes-search" aria-label="搜索便签" placeholder="搜索标题或攻略内容…" value={query} onChange={e=>setQuery(e.target.value)}/>
- {loading ? <p>正在加载便签…</p> : filtered.length===0 ? <div className="notes-empty"><h2>{query?'没有找到相关便签':'新赛季，从第一张便签开始'}</h2><p>{query?'换个关键词试试。':'发布活动攻略、贴上图片，让大家少错过一份奖励。'}</p></div> : [true,false].map(pinned=>{const group=filtered.filter(n=>n.pinned===pinned);return group.length>0 && <section key={String(pinned)}><h2 className="notes-section">{pinned?'📌 置顶必看':'全部便签'} <small>{group.length}</small></h2><div className="notes-grid">{group.map(n=><button disabled={busy} className={`note-card ${n.pinned?'is-pinned':''}`} key={n.id} onClick={()=>open(n.id)}><span className="note-tag">{n.pinned?'置顶 · 重点提醒':'攻略与提示'}</span><h3>{n.title}</h3><p>{n.content}</p><footer><time>{new Date(n.updatedAt).toLocaleString('zh-CN')}</time><span>查看详情 ↗</span></footer></button>)}</div></section>;})}
- {draft && <Modal title={draft.id?'编辑便签':'发布便签'} onClose={()=>{if(!busy)setDraft(null);}} footer={<><button className="btn" disabled={busy} onClick={()=>setDraft(null)}>取消</button><button className="btn primary" disabled={busy||!draft.title?.trim()||!draft.content?.trim()} onClick={save}>{busy?'保存中…':'保存便签'}</button></>}><label className="field"><span>标题</span><input type="text" maxLength={120} value={draft.title||''} onChange={e=>setDraft({...draft,title:e.target.value})}/></label><label className="field"><span>攻略与提示</span><textarea className="note-editor" maxLength={50000} rows={12} value={draft.content||''} onChange={e=>setDraft({...draft,content:e.target.value})}/></label><label className="note-pin-field"><input type="checkbox" checked={!!draft.pinned} onChange={e=>setDraft({...draft,pinned:e.target.checked})}/> 置顶提醒</label><p className="muted">保存后可在详情中添加图片和附件。支持换行，内容按原文展示。</p>{error && <p role="alert">{error}</p>}</Modal>}
- {detail && !draft && <Modal title={detail.note.title} onClose={()=>{if(!busy)setDetail(null);}} footer={<><button className="btn" disabled={busy} onClick={pin}>{detail.note.pinned?'取消置顶':'置顶'}</button><button className="btn" disabled={busy} onClick={()=>setDraft({...detail.note})}>编辑</button><button className="btn" disabled={busy} onClick={remove}>删除</button><button className="btn primary" disabled={busy} onClick={()=>setDetail(null)}>关闭</button></>}><p className="muted">{detail.note.pinned?'📌 置顶 · ':''}更新于 {new Date(detail.note.updatedAt).toLocaleString('zh-CN')}</p><div className="note-content">{detail.note.content}</div><h3>图片与附件 <small>{detail.attachments.length}/12</small></h3><div className="note-files">{detail.attachments.map(file=><Attachment key={file.id} noteId={detail.note.id} file={file} remove={async()=>{if(busy||!confirm('移除这个附件？'))return;setBusy(true);try{await notesApi.removeFile(detail.note.id,file.id);setDetail(await notesApi.detail(detail.note.id));}catch(e){fail(e);}finally{setBusy(false);}}}/>)}</div><label className="note-upload">{busy?'正在处理…':'＋ 添加图片或附件'}<input type="file" multiple disabled={busy||detail.attachments.length>=12} accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.zip" onChange={e=>{upload(e.target.files);e.target.value='';}}/></label><p className="muted">单个文件最大 20 MB。支持 PNG / JPG / GIF / WebP / PDF / TXT / ZIP；WebP 以附件下载。</p>{error && <p role="alert">{error}</p>}</Modal>}
- </div>;
+  const [notes, setNotes] = useState<GuideNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [detail, setDetail] = useState<NoteDetail | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [initial, setInitial] = useState<NoteDetail>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const fail = (e: unknown) => setError((e as Error).message);
+  async function load() { setNotes(await notesApi.list()); }
+  useEffect(() => { load().catch(fail).finally(() => setLoading(false)); }, []);
+  async function open(id: number) {
+    setBusy(true); setError('');
+    try { setDetail(await notesApi.detail(id)); } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+  async function saved(note: GuideNote) {
+    setEditing(false); setDetail(null); setBusy(true); setError('');
+    try { await load(); setDetail(await notesApi.detail(note.id)); } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!detail || !confirm('删除这张便签及全部附件？此操作无法撤销。')) return;
+    setBusy(true);
+    try { await notesApi.remove(detail.note.id); setDetail(null); await load(); } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+  async function pin() {
+    if (!detail) return;
+    setBusy(true);
+    try { const note = await notesApi.save({ ...detail.note, pinned: !detail.note.pinned }); setDetail({ ...detail, note }); await load(); } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+  const filtered = notes.filter(note => (note.title + ' ' + noteSummary(note.content)).toLowerCase().includes(query.toLowerCase()));
+  return <div className="notes-page">
+    <header className="notes-header"><div><span className="notes-eyebrow">SEASON FIELD NOTES</span><h1>活动攻略与TIPS</h1><p className="muted">攻略、活动提醒与容易错过的小细节，一起记在这里。</p></div><button className="btn primary" disabled={busy} onClick={() => { setInitial(undefined); setError(''); setEditing(true); }}>＋ 发布便签</button></header>
+    {error && <p className="note-error" role="alert">{error}</p>}
+    <input type="text" className="notes-search" aria-label="搜索便签" placeholder="搜索标题或攻略内容…" value={query} onChange={e => setQuery(e.target.value)} />
+    {loading ? <p>正在加载便签…</p> : filtered.length === 0 ? <div className="notes-empty"><h2>{query ? '没有找到相关便签' : '新赛季，从第一张便签开始'}</h2><p>{query ? '换个关键词试试。' : '发布活动攻略、贴上图片，让大家少错过一份奖励。'}</p></div> : [true, false].map(pinned => {
+      const group = filtered.filter(note => note.pinned === pinned);
+      return group.length > 0 && <section key={String(pinned)}><h2 className="notes-section">{pinned ? '📌 置顶必看' : '全部便签'} <small>{group.length}</small></h2><div className="notes-grid">{group.map(note => <button disabled={busy} className={`note-card ${note.pinned ? 'is-pinned' : ''}`} key={note.id} onClick={() => open(note.id)}><span className="note-tag">{note.pinned ? '置顶 · 重点提醒' : '攻略与提示'}</span><h3>{note.title}</h3><p>{noteSummary(note.content)}</p><footer><time>{new Date(note.updatedAt).toLocaleString('zh-CN')}</time><span>查看详情 ↗</span></footer></button>)}</div></section>;
+    })}
+    {editing && <NoteEditor key={initial?.note.id ?? 'new'} initial={initial} onSaved={saved} onClose={() => setEditing(false)} />}
+    {detail && !editing && <Modal title={detail.note.title} onClose={() => { if (!busy) setDetail(null); }} footer={<>
+      <button className="btn" disabled={busy} onClick={pin}>{detail.note.pinned ? '取消置顶' : '置顶'}</button>
+      <button className="btn" disabled={busy} onClick={() => { setInitial(detail); setEditing(true); }}>编辑</button>
+      <button className="btn" disabled={busy} onClick={remove}>删除</button>
+      <button className="btn primary" disabled={busy} onClick={() => setDetail(null)}>关闭</button>
+    </>}><p className="muted">{detail.note.pinned ? '📌 置顶 · ' : ''}更新于 {new Date(detail.note.updatedAt).toLocaleString('zh-CN')}</p><NoteBody detail={detail} /></Modal>}
+  </div>;
 }

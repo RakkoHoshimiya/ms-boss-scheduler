@@ -104,6 +104,12 @@ class AuthzMatrixTest {
     /** 期望矩阵：method + path + 身份 + 期望状态码。 */
     private static Stream<Arguments> matrix() {
         return Stream.of(
+            Arguments.of("POST", "/api/notes/attachments", "anon", 401),
+            Arguments.of("GET", "/api/notes/attachments/a", "anon", 401),
+            Arguments.of("DELETE", "/api/notes/attachments/a", "anon", 401),
+            Arguments.of("POST", "/api/notes/attachments", "viewer", 200),
+            Arguments.of("GET", "/api/notes/attachments/a", "viewer", 200),
+            Arguments.of("DELETE", "/api/notes/attachments/a", "viewer", 200),
             Arguments.of("GET", "/api/notes", "anon", 401),
             Arguments.of("GET", "/api/notes/1", "anon", 401),
             Arguments.of("GET", "/api/notes/1/attachments/a", "anon", 401),
