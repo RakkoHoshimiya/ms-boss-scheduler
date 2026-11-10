@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { notesApi, type GuideNote, type NoteDetail } from '../api/client';
 import { parseNoteContent, noteSummary } from '../features/note-content';
 import Modal from '../components/Modal';
@@ -6,7 +6,7 @@ import NoteEditor from '../components/NoteEditor';
 import NoteAttachmentPreview from '../components/NoteAttachmentPreview';
 
 function NoteBody({ detail }: { detail: NoteDetail }) {
-  const blocks = parseNoteContent(detail.note.content);
+  const blocks = useMemo(() => parseNoteContent(detail.note.content), [detail.note.content]);
   const inline = new Set(blocks.flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
   const footer = detail.attachments.filter(file => !inline.has(file.id));
   return <>

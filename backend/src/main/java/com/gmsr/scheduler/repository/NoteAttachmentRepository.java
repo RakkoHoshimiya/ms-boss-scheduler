@@ -14,5 +14,3 @@ public interface NoteAttachmentRepository extends JpaRepository<NoteAttachment,S
  int deleteExpiredStaged(@org.springframework.data.repository.query.Param("id") String id,
      @org.springframework.data.repository.query.Param("cutoff") java.time.Instant cutoff);
 }
-
-
