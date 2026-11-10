@@ -346,13 +346,14 @@ export const api = {
     request<{ username: string; defaultPassword: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' }),
 };
 
-export interface GuideNote { id: number; title: string; content: string; pinned: boolean; updatedAt: string }
+export interface GuideNote { id: number; version: number; title: string; content: string; pinned: boolean; updatedAt: string }
 export interface NoteAttachment { id: string; name: string; size: number; mediaType: string }
 export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
 export const notesApi = {
  list: () => request<GuideNote[]>('/notes'),
  detail: (id: number) => request<NoteDetail>(`/notes/${id}`),
  save: (note: Partial<GuideNote> & { attachmentIds?: string[] }) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
+ pin: (note: GuideNote) => request<GuideNote>(`/notes/${note.id}/pin`, {method:'PUT', body:JSON.stringify({pinned:!note.pinned, version:note.version})}),
  remove: (id: number) => request<void>(`/notes/${id}`, {method:'DELETE'}),
  upload: (id: number, file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>(`/notes/${id}/attachments`, {method:'POST',body}); },
  stage: (file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>('/notes/attachments', {method:'POST',body}); },

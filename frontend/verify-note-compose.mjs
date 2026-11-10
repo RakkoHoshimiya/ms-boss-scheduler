@@ -18,8 +18,10 @@ globalThis.fetch=async(url,opts={})=>{
   if(failUpload)return new Response(JSON.stringify({message:'test upload failure'}),{status:503});
   stages++;body={id:'image'+stages,name:'image'+stages+'.png',size:128,mediaType:'image/png'};stored.push(body);
  } else if(url.startsWith('/api/notes/attachments/')) return new Response('image bytes',{status:200});
- else if((url==='/api/notes' && opts.method==='POST') || (url==='/api/notes/1' && opts.method==='PUT')) {
-  writes++;body={...JSON.parse(opts.body),id:1,updatedAt:new Date().toISOString()};notes=[body];
+ else if(url==='/api/notes/1/pin') {
+  const update=JSON.parse(opts.body);assert.deepEqual(Object.keys(update).sort(),['pinned','version']);assert.equal(update.version,notes[0].version);notes=[{...notes[0],pinned:update.pinned,version:notes[0].version+1}];body=notes[0];
+ } else if((url==='/api/notes' && opts.method==='POST') || (url==='/api/notes/1' && opts.method==='PUT')) {
+  writes++;const update=JSON.parse(opts.body);if(opts.method==='PUT')assert.equal(update.version,notes[0].version);body={...update,id:1,version:notes.length?notes[0].version+1:0,updatedAt:new Date().toISOString()};notes=[body];
  } else if(url==='/api/notes')body=notes;
  else if(url==='/api/notes/1')body={note:notes[0],attachments:stored.filter(f=>notes[0].attachmentIds.includes(f.id))};
  else if(url==='/api/client-info')body={mobile:false};
@@ -53,6 +55,7 @@ button('发布便签').click();await wait();await wait();
 assert.equal(writes,1);assert.equal(notes[0].content,'before[[image:image1]]\nafter');assert.deepEqual(notes[0].attachmentIds,['image1','image2']);
 assert.equal(document.querySelectorAll('.note-content img').length,1);assert.equal(document.querySelectorAll('.note-footer-attachments img').length,1);
 assert.equal(document.querySelector('.note-content img').alt,'image1.png');assert.equal(document.querySelector('.note-footer-attachments img').alt,'image2.png');
+const beforePin=notes[0].content;button('置顶').click();await wait();assert.equal(notes[0].content,beforePin);assert.equal(notes[0].version,1);
 button('编辑').click();await wait();const edited=document.querySelector('.note-rich-editor');edited.querySelector('img').remove();edited.dispatchEvent(new w.Event('input',{bubbles:true}));await wait();button('保存修改').click();await wait();await wait();
 assert.equal(document.querySelectorAll('.note-content img').length,0);assert.equal(document.querySelectorAll('.note-footer-attachments img').length,1);
 assert.equal(notes[0].content,'before\nafter');assert.deepEqual(notes[0].attachmentIds,['image2']);

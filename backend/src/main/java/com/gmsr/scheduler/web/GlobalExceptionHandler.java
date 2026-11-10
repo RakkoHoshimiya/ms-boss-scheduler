@@ -27,6 +27,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(413).body(new ApiError("UPLOAD_TOO_LARGE", "单个附件不能超过 20 MB"));
     }
 
+    @ExceptionHandler({com.gmsr.scheduler.service.ConflictException.class, org.springframework.dao.ConcurrencyFailureException.class})
+    public ResponseEntity<ApiError> handleConcurrentUpdate(Exception ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiError("CONCURRENT_UPDATE", "内容已被其他人更新或正在修改，请重新打开后再试"));
+    }
+
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ApiError> handleNotFound(NotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ApiError("NOT_FOUND", ex.getMessage()));
@@ -184,7 +189,7 @@ public class GlobalExceptionHandler {
             code = "CONSTRAINT_VIOLATION";
             message = "数据不满足约束，操作未完成";
         }
-        log.warn("数据约束拒绝写入（{}）：{}", sqlState, raw);
+        log.warn("数据约束拒绝写入（{}）：{}", sqlState, code);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError(code, message));
     }
 

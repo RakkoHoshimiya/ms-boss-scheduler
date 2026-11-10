@@ -47,7 +47,7 @@ export default function NotesPage() {
   async function pin() {
     if (!detail) return;
     setBusy(true);
-    try { const note = await notesApi.save({ ...detail.note, pinned: !detail.note.pinned }); setDetail({ ...detail, note }); await load(); } catch (e) { fail(e); } finally { setBusy(false); }
+    try { const note = await notesApi.pin(detail.note); setDetail({ ...detail, note }); await load(); } catch (e) { fail(e); } finally { setBusy(false); }
   }
   const filtered = notes.filter(note => (note.title + ' ' + noteSummary(note.content)).toLowerCase().includes(query.toLowerCase()));
   return <div className="notes-page">

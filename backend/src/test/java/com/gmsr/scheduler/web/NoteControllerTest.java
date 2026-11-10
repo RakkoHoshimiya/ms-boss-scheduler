@@ -14,7 +14,7 @@ class NoteControllerTest {
  NoteRepository notes=mock(NoteRepository.class);
  NoteAttachmentRepository files=mock(NoteAttachmentRepository.class);
  NoteController controller;
- @BeforeEach void setup(){controller=new NoteController(notes,files,directory.toString());when(notes.findById(1L)).thenReturn(Optional.of(new Note()));when(files.findByNoteIdOrderById(1L)).thenReturn(List.of());}
+ @BeforeEach void setup(){controller=new NoteController(notes,files,directory.toString());Note n=new Note();n.id=1L;when(notes.findById(1L)).thenReturn(Optional.of(n));when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));when(files.findByNoteIdOrderById(1L)).thenReturn(List.of());}
  @Test void uniqueNamesAndSafePath() throws Exception {
   var file=new MockMultipartFile("file","../../guide.txt","text/plain","tips".getBytes());
   var first=controller.upload(1L,file);var second=controller.upload(1L,file);
@@ -41,30 +41,49 @@ class NoteControllerTest {
   var capture=org.mockito.ArgumentCaptor.forClass(NoteAttachment.class);verify(files).saveAndFlush(capture.capture());
   assertNull(capture.getValue().noteId);assertEquals(7L,capture.getValue().uploadedBy);verify(notes,never()).saveAndFlush(any());
  }
- @Test void unpublishedUploadsArePrivate(){login(7);staged("a",8,"image/png");assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));assertThrows(NotFoundException.class,()->controller.create(new NoteController.Edit("guide","[[image:a]]",false,List.of("a"))));}
+ @Test void unpublishedUploadsArePrivate(){login(7);staged("a",8,"image/png");assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));assertThrows(NotFoundException.class,()->controller.create(new NoteController.Edit("guide","[[image:a]]",false,List.of("a"), null)));}
  @Test void publishBindsImagesAndFooterFilesTogether(){
   login(7);var image=staged("image",7,"image/png");var footer=staged("pdf",7,"application/octet-stream");
   when(notes.saveAndFlush(any())).thenAnswer(call->{Note n=call.getArgument(0);n.id=44L;return n;});
-  Note n=controller.create(new NoteController.Edit("guide","before[[image:image]]after",false,List.of("image","pdf")));
+  Note n=controller.create(new NoteController.Edit("guide","before[[image:image]]after",false,List.of("image","pdf"), null));
   assertEquals(44L,image.noteId);assertEquals(44L,footer.noteId);assertEquals("before[[image:image]]after",n.content);
  }
  @Test void rejectsForeignNoteAndNonImageReferences(){
   login(7);var image=staged("image",7,"image/png");image.noteId=99L;
-  assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"))));
-  staged("pdf",7,"application/octet-stream");assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:pdf]]",false,List.of("pdf"))));
+  assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"), null)));
+  staged("pdf",7,"application/octet-stream");assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:pdf]]",false,List.of("pdf"), null)));
   verify(notes,never()).saveAndFlush(any());
  }
  @Test void failedSaveDoesNotConsumeStagedUpload(){
   login(7);var image=staged("image",7,"image/png");when(notes.saveAndFlush(any())).thenThrow(new IllegalStateException("db down"));
-  assertThrows(IllegalStateException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"))));assertNull(image.noteId);
+  assertThrows(IllegalStateException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"), null)));assertNull(image.noteId);
  }
  @Test void draftQuotaAndCancelProtection(){
-  login(7);when(files.countByNoteIdIsNullAndUploadedBy(7L)).thenReturn(24L);assertThrows(BusinessException.class,()->controller.stage(new MockMultipartFile("file","a.txt","text/plain","tips".getBytes())));
+  login(7);when(files.countByNoteIdIsNullAndRetiredFalseAndUploadedByAndCreatedAtAfter(eq(7L),any())).thenReturn(24L);assertThrows(BusinessException.class,()->controller.stage(new MockMultipartFile("file","a.txt","text/plain","tips".getBytes())));
   var published=staged("image",7,"image/png");published.noteId=1L;assertThrows(BusinessException.class,()->controller.discard("image"));verify(files,never()).delete(any());
  }
  @Test void removedPublishedAttachmentsWaitForSuccessfulSave(){
-  login(7);Note n=new Note();n.id=1L;when(notes.findById(1L)).thenReturn(Optional.of(n));
+  login(7);Note n=new Note();n.id=1L;when(notes.findById(1L)).thenReturn(Optional.of(n));when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));
   var image=staged("image",7,"image/png");image.noteId=1L;when(files.findByNoteIdOrderById(1L)).thenReturn(List.of(image));when(notes.saveAndFlush(any())).thenReturn(n);
-  controller.update(1L,new NoteController.Edit("guide","text",false,List.of()));assertNull(image.noteId);verify(files,never()).delete(any());
+  controller.update(1L,new NoteController.Edit("guide","text",false,List.of(), 0L));assertNull(image.noteId);verify(files,never()).delete(any());
+ }
+
+ @Test void staleEditAndPinCannotOverwriteCurrentContent(){
+  Note n=new Note();n.id=1L;n.version=3;n.content="current";when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));
+  assertThrows(ConflictException.class,()->controller.update(1L,new NoteController.Edit("old","stale",false,List.of(),2L)));
+  assertThrows(ConflictException.class,()->controller.pin(1L,new NoteController.Pin(true,2L)));
+  assertEquals("current",n.content);verify(notes,never()).saveAndFlush(any());
+ }
+ @Test void pinOnlyChangesPinAndKeepsContent(){
+  Note n=new Note();n.id=1L;n.version=3;n.content="current";when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));when(notes.saveAndFlush(n)).thenReturn(n);
+  controller.pin(1L,new NoteController.Pin(true,3L));assertEquals("current",n.content);assertTrue(n.pinned);verifyNoInteractions(files);
+ }
+ @Test void deletingNoteDefersFileDeletionUntilAfterRetention() throws Exception {
+  login(7);var a=staged("a",7,"image/png");a.noteId=1L;a.storageKey="a.png";Files.writeString(directory.resolve(a.storageKey),"image");when(files.findByNoteIdOrderById(1L)).thenReturn(List.of(a));
+  controller.delete(1L);assertTrue(a.retired);assertNull(a.noteId);assertTrue(Files.exists(directory.resolve(a.storageKey)));verify(notes).delete(any());
+ }
+ @Test void retiredAndExpiredFilesCannotBeReattached(){
+  login(7);var a=staged("a",7,"image/png");a.retired=true;assertThrows(NotFoundException.class,()->controller.create(new NoteController.Edit("title","text",false,List.of("a"),null)));
+  a.retired=false;a.createdAt=java.time.Instant.now().minus(java.time.Duration.ofDays(2));assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));
  }
 }

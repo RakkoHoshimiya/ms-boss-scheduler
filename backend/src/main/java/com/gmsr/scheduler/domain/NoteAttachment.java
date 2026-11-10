@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 public class NoteAttachment {
  @Id public String id;
  @Column public Long noteId;
+ @Column(nullable=false) public boolean retired;
  @Column public Long uploadedBy;
  @Column(nullable=false) public java.time.Instant createdAt;
  @Column(nullable=false) public String name;

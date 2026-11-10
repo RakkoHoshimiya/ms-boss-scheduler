@@ -47,41 +47,28 @@ public class PlayerService {
     public List<PlayerView> list() {
         List<Player> players = playerRepository.findAllByOrderBySortOrderAscIdAsc();
         List<GameCharacter> characters = characterRepository.findAllByOrderByPlayerSortOrderAscSortOrderAscIdAsc();
-        /**
-         * QQ 号就是群友的登录账号，而 /api/players 是**匿名可访问**的
-         * （SecurityConfig 里 `GET /api/**` permitAll）。
-         * 如果连 QQ 一起返回，任何人都能拿到全群用户名，再配合初始口令
-         * 批量尝试登录、接管尚未改密的账号。所以只有管理员才看得到明文 QQ，
-         * 其余情况一律置空；但**本人**可以看到自己的 QQ（否则他连登录名都不知道）。
-         * 同时返回 hasQq，让前端能区分「没登记」和「无权看」。
-         */
+        // Group once; scanning every character for every player becomes quadratic.
+        var byPlayer = characters.stream().collect(java.util.stream.Collectors.groupingBy(c -> c.getPlayer().getId()));
         boolean canSeeAllQq = CurrentUser.isStaff();
         Long myPlayerId = CurrentUser.playerId();
         List<PlayerView> result = new ArrayList<>(players.size());
         for (Player player : players) {
-            List<CharacterView> own = characters.stream()
-                    .filter(c -> c.getPlayer().getId().equals(player.getId()))
-                    .sorted(Comparator.comparingInt(GameCharacter::getPower).reversed()
-                            .thenComparing(GameCharacter::getId))
-                    .map(PlayerService::toView)
-                    .toList();
-            result.add(new PlayerView(
-                    player.getId(),
-                    player.getNickname(),
-                    // 管理员/编辑看全部；其他人只能看**自己**的（自己的登录名不算隐私，否则本人也无从知道账号）
-                    (canSeeAllQq || player.getId().equals(myPlayerId)) ? player.getQq() : null,
-                    player.getQq() != null && !player.getQq().isBlank(),
-                    player.getRemark(),
-                    player.isActive(),
-                    player.getSortOrder(),
-                    own.size(),
-                    own));
+            result.add(playerView(player, byPlayer.getOrDefault(player.getId(), List.of()), canSeeAllQq, myPlayerId));
         }
         // 最强战力高的排前面
         result.sort(Comparator.comparingInt((PlayerView view) ->
                 view.characters().isEmpty() ? 0 : view.characters().getFirst().power()).reversed()
                 .thenComparing(PlayerView::id));
         return result;
+    }
+
+    private PlayerView playerView(Player player, List<GameCharacter> characters, boolean canSeeAllQq, Long myPlayerId) {
+        List<CharacterView> own = characters.stream()
+                .sorted(Comparator.comparingInt(GameCharacter::getPower).reversed().thenComparing(GameCharacter::getId))
+                .map(PlayerService::toView).toList();
+        return new PlayerView(player.getId(), player.getNickname(),
+                (canSeeAllQq || player.getId().equals(myPlayerId)) ? player.getQq() : null,
+                player.getQq() != null && !player.getQq().isBlank(), player.getRemark(), player.isActive(), player.getSortOrder(), own.size(), own);
     }
 
     /** 某个群友自己的角色（供群友本人管理用）。 */
@@ -103,10 +90,8 @@ public class PlayerService {
 
     @Transactional(readOnly = true)
     public PlayerView get(Long id) {
-        return list().stream()
-                .filter(p -> p.id().equals(id))
-                .findFirst()
-                .orElseThrow(() -> new NotFoundException("群友不存在：" + id));
+        Player player = playerRepository.findById(id).orElseThrow(() -> new NotFoundException("群友不存在：" + id));
+        return playerView(player, characterRepository.findByPlayerIdOrderBySortOrderAscIdAsc(id), CurrentUser.isStaff(), CurrentUser.playerId());
     }
 
     @Transactional

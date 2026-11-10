@@ -110,7 +110,6 @@ class AuthServiceBindingTest {
         AppUser user = boundUser(2L, "223456789", "群友B", "群友B");
         when(userRepository.findById(2L)).thenReturn(java.util.Optional.of(user));
         when(userRepository.findAll()).thenReturn(java.util.List.of(user));
-        when(playerRepository.findByNickname("群友B")).thenReturn(java.util.Optional.of(user.getPlayer()));
 
         authService.updateUser(2L, new UserUpdateRequest("群友B", null, true, true, "new-password-123"));
 
@@ -138,7 +137,6 @@ class AuthServiceBindingTest {
     @DisplayName("新建账号：用户名是合法 QQ 才写进 player.qq，否则留空（避免非法 QQ 与唯一键冲突）")
     void createUserWritesQqOnlyWhenValid() {
         when(userRepository.findByUsername("not-a-qq")).thenReturn(java.util.Optional.empty());
-        when(userRepository.findAll()).thenReturn(java.util.List.of());
         when(playerRepository.findByNickname("新建群友")).thenReturn(java.util.Optional.empty());
         // 模拟自增主键：第二次保存（绑定 player 到 user）时已经有 id
         org.mockito.Mockito.when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> {
@@ -159,7 +157,6 @@ class AuthServiceBindingTest {
     @DisplayName("新建账号：用户名本身就是 QQ 号时，写入 player.qq")
     void createUserWritesQqWhenValid() {
         when(userRepository.findByUsername("123456789")).thenReturn(java.util.Optional.empty());
-        when(userRepository.findAll()).thenReturn(java.util.List.of());
         when(playerRepository.findByNickname("群友Q")).thenReturn(java.util.Optional.empty());
         when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> {
             AppUser arg = invocation.getArgument(0);

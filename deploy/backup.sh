@@ -14,6 +14,7 @@
 #   * 数据库与配置包都按 KEEP_DAYS 清理
 #
 set -euo pipefail
+umask 077
 
 ENV_FILE="${ENV_FILE:-/opt/gmsr/gmsr.env}"
 BACKUP_DIR="${BACKUP_DIR:-/root/backup}"
@@ -31,6 +32,8 @@ set -a; . "$ENV_FILE"; set +a
 : "${GMSR_DB_PASSWORD:?gmsr.env 里没有 GMSR_DB_PASSWORD}"
 
 mkdir -p "$BACKUP_DIR"
+exec 9>"$BACKUP_DIR/.gmsr-backup.lock"
+flock -n 9 || die "已有备份在运行，本次跳过"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="$BACKUP_DIR/gmsr-$STAMP.dump"
 TMP_IN_CONTAINER="/tmp/gmsr-backup-$STAMP.dump"
@@ -50,6 +53,7 @@ docker exec "$CONTAINER" pg_restore --list "$TMP_IN_CONTAINER" > /dev/null 2>&1 
     || die "数据库备份校验失败（pg_restore --list 读不出来）"
 
 docker cp "$CONTAINER:$TMP_IN_CONTAINER" "$OUT" > /dev/null
+chmod 600 "$OUT"
 echo "  ✓ 数据库 $OUT ($(du -h "$OUT" | cut -f1))  校验通过"
 
 # ---------------------------------------------------------------- 2) 配置
@@ -64,6 +68,8 @@ REQUIRED=(
 # 可选：没有也能恢复（例如不用语音时没有 livekit 配置）
 OPTIONAL=(
     opt/1panel/www/conf.d/livekit-rtc.inc
+    opt/1panel/www/conf.d/security-headers.inc
+    opt/gmsr/bin/backup-attachments.sh
     opt/gmsr/bin/backup.sh
     opt/gmsr/bin/restore.sh
     etc/systemd/system/gmsr-backup.service
@@ -93,6 +99,14 @@ for f in "${REQUIRED[@]}"; do
 done
 echo "  ✓ 配置 $CONF ($(du -h "$CONF" | cut -f1))  含 ${#INCLUDE[@]} 个文件，必需项齐全"
 
+# Attachment files are separate from PostgreSQL; use the same stamp to pair restores.
+NOTES_DIR="${GMSR_NOTES_DIRECTORY:-/opt/gmsr/data/note-attachments}"
+[[ "$NOTES_DIR" = /* ]] || NOTES_DIR="/opt/gmsr/$NOTES_DIR"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+[[ -f "$HERE/backup-attachments.sh" ]] || die "缺少附件备份工具"
+[[ -d "$NOTES_DIR" ]] || die "附件目录不存在，不能生成完整备份"
+bash "$HERE/backup-attachments.sh" "$NOTES_DIR" "$BACKUP_DIR/gmsr-notes-$STAMP.tar.gz"
+
 # ---------------------------------------------------------------- 3) 应用 jar
 if [[ -f /opt/gmsr/app/gmsr-scheduler.jar ]]; then
     cp /opt/gmsr/app/gmsr-scheduler.jar "$BACKUP_DIR/gmsr-scheduler-latest.jar"
@@ -105,7 +119,7 @@ fi
 DELETED=0
 while IFS= read -r old; do
     rm -f "$old" && DELETED=$((DELETED + 1))
-done < <(find "$BACKUP_DIR" -maxdepth 1 \( -name 'gmsr-*.dump' -o -name 'gmsr-conf-*.tar.gz' \) \
+done < <(find "$BACKUP_DIR" -maxdepth 1 \( -name 'gmsr-*.dump' -o -name 'gmsr-conf-*.tar.gz' -o -name 'gmsr-notes-*.tar.gz' \) \
              -type f -mtime "+$KEEP_DAYS")
 [[ $DELETED -gt 0 ]] && echo "  清理了 $DELETED 个超过 ${KEEP_DAYS} 天的备份"
 

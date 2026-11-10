@@ -29,6 +29,8 @@ class GlobalExceptionHandlerTest {
 
     @RestController
     static class BoomController {
+        @GetMapping("/boom/conflict")
+        String conflict() { throw new com.gmsr.scheduler.service.ConflictException("stale version"); }
         @GetMapping("/boom/redis")
         String redisTimeout() {
             throw new QueryTimeoutException("Redis command timed out");
@@ -41,5 +43,10 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/boom/redis"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("STORAGE_UNAVAILABLE")));
+    }
+    @Test
+    void concurrentUpdateMapsTo409() throws Exception {
+        mockMvc.perform(get("/boom/conflict")).andExpect(status().isConflict())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("CONCURRENT_UPDATE")));
     }
 }

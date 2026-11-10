@@ -26,22 +26,30 @@ public class NoteController {
    @Value("${gmsr.notes.directory:./data/note-attachments}") String directory) {
   this.notes=notes; this.attachments=attachments; this.root=Path.of(directory).toAbsolutePath().normalize();
  }
- public record Edit(@NotBlank @Size(max=120) String title, @NotBlank @Size(max=50000) String content, boolean pinned, @Size(max=12) List<String> attachmentIds) {}
+ public record Edit(@NotBlank @Size(max=120) String title, @NotBlank @Size(max=50000) String content, boolean pinned, @Size(max=12) List<@NotBlank String> attachmentIds, Long version) {}
  public record AttachmentView(String id,String name,long size,String mediaType) {}
  public record Detail(Note note,List<AttachmentView> attachments) {}
  private Note note(Long id) { return notes.findById(id).orElseThrow(()->new NotFoundException("便签不存在")); }
+ private Note lockedNote(Long id) { return notes.findForUpdate(id).orElseThrow(()->new NotFoundException("便签不存在")); }
+ private void checkVersion(Note note,Long version) {
+  if(version==null || note.version!=version) throw new ConflictException("便签已被更新，请关闭编辑后重新打开，避免覆盖其他人的修改");
+ }
+ public record Pin(boolean pinned, @NotNull Long version) {}
+ @PutMapping("/{id}/pin") @Transactional public Note pin(@PathVariable Long id,@Valid @RequestBody Pin request) {
+  Note note=lockedNote(id); checkVersion(note,request.version()); note.pinned=request.pinned(); note.updatedAt=Instant.now(); return notes.saveAndFlush(note);
+ }
  private AttachmentView view(NoteAttachment a) { return new AttachmentView(a.id,a.name,a.size,a.mediaType); }
  @GetMapping public List<Note> list() { return notes.findAllByOrderByPinnedDescUpdatedAtDescIdDesc(); }
  @GetMapping("/{id}") public Detail detail(@PathVariable Long id) { return new Detail(note(id), attachments.findByNoteIdOrderById(id).stream().map(this::view).toList()); }
  @PostMapping @Transactional public Note create(@Valid @RequestBody Edit edit) { return save(new Note(),edit); }
- @PutMapping("/{id}") @Transactional public Note update(@PathVariable Long id,@Valid @RequestBody Edit edit) { return save(note(id),edit); }
+ @PutMapping("/{id}") @Transactional public Note update(@PathVariable Long id,@Valid @RequestBody Edit edit) { Note note=lockedNote(id); checkVersion(note,edit.version()); return save(note,edit); }
  private Note save(Note n,Edit e) {
   List<NoteAttachment> selected;
   List<NoteAttachment> previous=n.id==null?List.of():attachments.findByNoteIdOrderById(n.id);
   if(e.attachmentIds()==null) selected=previous;
   else {
    if(new HashSet<>(e.attachmentIds()).size()!=e.attachmentIds().size()) throw new BusinessException("附件不能重复");
-   selected=e.attachmentIds().stream().map(this::publicationAttachment).toList();
+   selected=e.attachmentIds().stream().sorted().map(this::publicationAttachment).toList();
    for(NoteAttachment a:selected) if(a.noteId!=null && !a.noteId.equals(n.id)) throw new BusinessException("附件属于其他便签");
   }
   var marker=java.util.regex.Pattern.compile("\\[\\[image:([a-zA-Z0-9-]+)\\]\\]").matcher(e.content());
@@ -54,7 +62,7 @@ public class NoteController {
   for(NoteAttachment a:selected) { a.noteId=saved.id; attachments.save(a); }
   Set<String> kept=selected.stream().map(a->a.id).collect(java.util.stream.Collectors.toSet());
   // Detach on commit; physical deletion is delayed so a failed save cannot break the old note.
-  for(NoteAttachment a:previous) if(!kept.contains(a.id)) {a.noteId=null; a.uploadedBy=CurrentUser.id(); a.createdAt=Instant.now(); attachments.save(a);}
+  for(NoteAttachment a:previous) if(!kept.contains(a.id)) retire(a);
   return saved;
  }
  private NoteAttachment accessibleAttachment(String aid) {
@@ -65,13 +73,14 @@ public class NoteController {
   return checkAttachmentAccess(attachments.findForPublication(aid).orElseThrow(()->new NotFoundException("附件不存在")));
  }
  private NoteAttachment checkAttachmentAccess(NoteAttachment a) {
+  if(a.retired || (a.noteId==null && (a.createdAt==null || a.createdAt.isBefore(Instant.now().minus(Duration.ofHours(24)))))) throw new NotFoundException("附件已过期或已移除");
   if(a.noteId==null && (CurrentUser.id()==null || !CurrentUser.id().equals(a.uploadedBy))) throw new NotFoundException("附件不存在");
   return a;
  }
  @PostMapping("/attachments") public synchronized AttachmentView stage(@RequestParam("file") MultipartFile file) throws IOException {
   Long user=CurrentUser.id();
   if(user==null) throw new UnauthorizedException("请先登录");
-  if(attachments.countByNoteIdIsNullAndUploadedBy(user)>=24) throw new BusinessException("待发布附件过多，请先保存或取消正在编辑的便签");
+  if(attachments.countByNoteIdIsNullAndRetiredFalseAndUploadedByAndCreatedAtAfter(user,Instant.now().minus(Duration.ofHours(24)))>=24) throw new BusinessException("待发布附件过多，请先保存或取消正在编辑的便签");
   return store(null,file);
  }
  @GetMapping("/attachments/{aid}") public ResponseEntity<Resource> stagedDownload(@PathVariable String aid) {
@@ -80,16 +89,19 @@ public class NoteController {
  @DeleteMapping("/attachments/{aid}") @Transactional public ResponseEntity<Void> discard(@PathVariable String aid) throws IOException {
   NoteAttachment a=publicationAttachment(aid);
   if(a.noteId!=null) throw new BusinessException("已发布附件请在编辑便签时移除");
-  removeFile(a); return ResponseEntity.noContent().build();
+  retire(a); return ResponseEntity.noContent().build();
  }
- @DeleteMapping("/{id}") public ResponseEntity<Void> delete(@PathVariable Long id) throws IOException {
-  Note n=note(id);
-  for(NoteAttachment a:attachments.findByNoteIdOrderById(id)) removeFile(a);
+ @DeleteMapping("/{id}") @Transactional public ResponseEntity<Void> delete(@PathVariable Long id) {
+  Note n=lockedNote(id);
+  for(NoteAttachment a:attachments.findByNoteIdOrderById(id)) retire(a);
+  attachments.flush();
   notes.delete(n); return ResponseEntity.noContent().build();
  }
- @PostMapping("/{id}/attachments") public synchronized AttachmentView upload(@PathVariable Long id,@RequestParam("file") MultipartFile file) throws IOException {
-  note(id);
-  return store(id,file);
+ @PostMapping("/{id}/attachments") @Transactional public AttachmentView upload(@PathVariable Long id,@RequestParam("file") MultipartFile file) throws IOException {
+  Note n=lockedNote(id);
+  AttachmentView result=store(id,file);
+  n.updatedAt=Instant.now(); notes.saveAndFlush(n);
+  return result;
  }
  private AttachmentView store(Long id,MultipartFile file) throws IOException {
   if(file.isEmpty() || file.getSize()>20*1024*1024) throw new BusinessException("附件大小须在 1 字节到 20 MB 之间");
@@ -121,6 +133,13 @@ public class NoteController {
   Path path=root.resolve(a.storageKey); Files.createDirectories(path.getParent());
   try { file.transferTo(path); attachments.saveAndFlush(a); }
   catch(Exception e) { Files.deleteIfExists(path); throw e; }
+  if(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+   org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+    @Override public void afterCompletion(int status) {
+     if(status==STATUS_ROLLED_BACK) try { Files.deleteIfExists(path); } catch(IOException ex) { org.slf4j.LoggerFactory.getLogger(NoteController.class).warn("回滚上传的临时文件清理失败"); }
+    }
+   });
+  }
   return view(a);
  }
  private NoteAttachment attachment(Long id,String aid) {
@@ -136,8 +155,14 @@ public class NoteController {
    .header("Content-Disposition",ContentDisposition.attachment().filename(a.name,java.nio.charset.StandardCharsets.UTF_8).build().toString())
    .contentType(MediaType.parseMediaType(a.mediaType)).body(resource);
  }
- @DeleteMapping("/{id}/attachments/{aid}") public ResponseEntity<Void> deleteAttachment(@PathVariable Long id,@PathVariable String aid) throws IOException {
-  NoteAttachment a=attachment(id,aid); removeFile(a); return ResponseEntity.noContent().build();
+ @DeleteMapping("/{id}/attachments/{aid}") @Transactional public ResponseEntity<Void> deleteAttachment(@PathVariable Long id,@PathVariable String aid) {
+  Note n=lockedNote(id);
+  NoteAttachment a=publicationAttachment(aid);
+  if(!Objects.equals(a.noteId,id)) throw new NotFoundException("附件不存在");
+  n.content=n.content.replace("[[image:"+aid+"]]", ""); n.updatedAt=Instant.now(); notes.saveAndFlush(n);
+  retire(a); return ResponseEntity.noContent().build();
  }
- private void removeFile(NoteAttachment a) throws IOException { Files.deleteIfExists(root.resolve(a.storageKey)); attachments.delete(a); }
+ private void retire(NoteAttachment a) {
+  a.noteId=null; a.retired=true; a.uploadedBy=CurrentUser.id(); a.createdAt=Instant.now(); attachments.save(a);
+ }
 }

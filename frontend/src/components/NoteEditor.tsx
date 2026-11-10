@@ -69,7 +69,7 @@ export default function NoteEditor({ initial, onSaved, onClose }: { initial?: No
     const selected = files.filter(file => footerIds.has(file.id) || inDocument.has(file.id));
     setBusy(true); setError('');
     try {
-      const note = await notesApi.save({ id: initial?.note.id, title, content: documentContent, pinned, attachmentIds: selected.map(file => file.id) });
+      const note = await notesApi.save({ id: initial?.note.id, version: initial?.note.version, title, content: documentContent, pinned, attachmentIds: selected.map(file => file.id) });
       const attached = new Set(selected.map(file => file.id));
       await Promise.allSettled([...staged.current].filter(id => !attached.has(id)).map(id => notesApi.discard(id)));
       staged.current.clear(); onSaved(note);
