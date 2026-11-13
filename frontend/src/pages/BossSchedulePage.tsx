@@ -1305,7 +1305,7 @@ export default function BossSchedulePage() {
                     */}
                     <button
                       className="btn small"
-                      title="复制这一趟（含阵容）"
+                      title="复制这一趟（空趟，阵容需要重新排）"
                       onClick={() => copyRun(run)}
                     >
                       复制

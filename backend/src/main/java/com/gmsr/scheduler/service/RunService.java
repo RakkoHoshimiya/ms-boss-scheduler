@@ -291,20 +291,17 @@ public class RunService {
             runRepository.save(copy);
             runRepository.flush();
 
-            for (MemberView member : source.members()) {
-                GameCharacter character = characterRepository.findById(member.characterId())
-                        .orElseThrow(() -> new NotFoundException("角色不存在：" + member.characterId()));
-                ensureSingleCharacterPerPlayer(copy.getId(), character.getId(), null);
-                RunMember row = new RunMember();
-                row.setRun(copy);
-                row.setCharacter(character);
-                row.setSlotNo(member.slotNo());
-                row.setRole(RunMember.Role.valueOf(member.role()));
-                row.setStatus(RunMember.Status.valueOf(member.status()));
-                row.setNote(member.note());
-                memberRepository.save(row);
-            }
-            memberRepository.flush();
+            /*
+             * 只复制「空趟」，**不复制阵容**。
+             *
+             * V6 迁移把「同一角色在同一 BOSS + 同一难度下只能排一趟」下沉成了唯一约束
+             * （uq_run_seat_boss_tier_character）。复制出来的新趟与原趟同 BOSS、同难度，
+             * 只要把席位一起带过去，就必然撞这条约束 —— 线上表现是点「复制这一趟」
+             * 直接报 400「已经存在相同的记录」，功能实际不可用。
+             *
+             * 这条约束是对的（否则同一个人会被双排到同一 BOSS 的两趟车上），
+             * 所以复制只保留这一趟的「骨架」：难度、时间、备注，阵容留给用户重新排。
+             */
             if (memberBoss.getId().equals(boss.getId())) {
                 created = copy;
             }

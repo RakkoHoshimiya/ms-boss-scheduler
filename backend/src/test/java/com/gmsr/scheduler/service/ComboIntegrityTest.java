@@ -152,14 +152,25 @@ class ComboIntegrityTest {
                 assertTrue(exists, "成员 BOSS「" + b.getName() + "」缺少第 " + copied.runIndex() + " 趟");
             }
 
-            // 复制出来的每一趟都要带上阵容
+            /*
+             * 复制出来的是「空趟」，阵容不跟着复制。
+             *
+             * V6 的唯一约束规定同一角色在同一 BOSS + 同一难度只能排一趟，
+             * 复制出来的新趟与原趟同 BOSS 同难度，带阵容必然撞约束
+             * （线上表现为点「复制这一趟」报 400 已经存在相同的记录）。
+             * 所以这里断言复制结果没有席位，且骨架（难度/备注）保持一致。
+             */
             for (Boss b : f.combo()) {
                 long withMember = runRepository.findByBossIdOrderByRunIndexAsc(b.getId()).stream()
                         .filter(r -> r.getRunIndex() == copied.runIndex())
                         .mapToLong(r -> memberRepository.countByRunId(r.getId()))
                         .sum();
-                assertEquals(1, withMember, "成员 BOSS「" + b.getName() + "」复制的这一趟应带 1 个席位");
+                assertEquals(0, withMember, "成员 BOSS「" + b.getName() + "」复制的这一趟应该是空趟");
             }
+            var sourceRow = runRepository.findById(first.id()).orElseThrow();
+            var copiedRow = runRepository.findById(copied.id()).orElseThrow();
+            assertEquals(sourceRow.getTier(), copiedRow.getTier(), "难度应与源趟一致");
+            assertEquals(sourceRow.getNote(), copiedRow.getNote(), "备注应随趟次一起复制");
         } finally {
             cleanup(f);
         }
