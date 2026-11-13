@@ -13,9 +13,11 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -81,23 +83,49 @@ public class WeeklyStatusResetService {
     }
 
     /** 每周四 08:00 触发。 */
-    @Scheduled(cron = "0 0 8 * * THU", zone = "Asia/Shanghai")
-    public void scheduledReset() {
-        try {
-            resetIfDue();
-        } catch (Exception ex) {
-            // 定时任务里抛异常会被吞掉，至少留下日志
-            log.error("每周状态重置失败", ex);
+    /**
+     * 每隔一段时间检查一次「是否已经过了最近一个周四 08:00」，过了就重置。
+     *
+     * 为什么不用 @Scheduled：
+     *   线上出现过「周四 08:00 什么都没发生」——进程从上周一直活着、
+     *   注解也编译进了 class，但 JVM 里根本没有 Spring 的调度线程，任务从未被触发。
+     *   与其依赖框架的调度器（还受虚拟线程等配置影响），不如自己起一个守护线程：
+     *   行为完全可控，线程名固定（gmsr-reset-timer）也便于确认它在跑。
+     *
+     * 每 10 分钟检查一次，有以下好处：
+     *   - 不依赖精确的 8:00 触发，误差最多 10 分钟
+     *   - 停机错过了也能在恢复后 10 分钟内补上（不需要专门的「启动补跑」逻辑）
+     *   - 本身是幂等的：标记没到点就直接返回，只有一条 SELECT 的开销
+     */
+    private static final long CHECK_INTERVAL_SECONDS = 600;
+    private ScheduledExecutorService timer;
+
+    @PostConstruct
+    void startTimer() {
+        timer = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "gmsr-reset-timer");
+            t.setDaemon(true);
+            return t;
+        });
+        // 启动 20 秒后先检查一次：既覆盖「停机错过」，也避开启动初期的资源争抢
+        timer.scheduleWithFixedDelay(this::tick, 20, CHECK_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        log.info("状态重置：定时检查已启动（每 {} 分钟一次），上次重置 {}，下次 {}",
+                CHECK_INTERVAL_SECONDS / 60, lastResetAt(), nextResetAt());
+    }
+
+    @PreDestroy
+    void stopTimer() {
+        if (timer != null) {
+            timer.shutdownNow();
         }
     }
 
-    /** 启动时补跑一次（覆盖「周四 08:00 时服务没在跑」的情况）。 */
-    @EventListener(ApplicationReadyEvent.class)
-    public void catchUpOnStartup() {
+    /** 定时线程体：任何异常都要吞掉，否则一次失败会让后续检查全部停止。 */
+    private void tick() {
         try {
             resetIfDue();
         } catch (Exception ex) {
-            log.warn("启动时补跑状态重置失败：{}", ex.getMessage());
+            log.error("状态重置检查失败（下一轮会继续）", ex);
         }
     }
 

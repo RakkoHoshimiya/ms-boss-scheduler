@@ -34,6 +34,13 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 
 export const CHANGE_LOG: ChangeGroup[] = [
   {
+    date: '11/13',
+    title: '修复每周状态重置没有执行',
+    entries: [
+      { type: 'fix', text: '上周四 08:00 的自动重置没有生效：服务一直在跑、注解也在，但 Spring 的定时任务始终没被触发。现在改成自带一个守护线程，每 10 分钟检查一次「是否已过最近一个周四 08:00」，错过也会在 10 分钟内补上' },
+    ],
+  },
+  {
     date: '11/08',
     title: '账号绑定、启动迁移与权限收口（第三轮评审整改）',
     entries: [
