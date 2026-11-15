@@ -22,10 +22,12 @@ public class NoteController {
  private final NoteRepository notes;
  private final NoteAttachmentRepository attachments;
  private final NoteDraftRepository drafts;
+ private final NoteImagePreview previews;
  private final Path root;
  public NoteController(NoteRepository notes, NoteAttachmentRepository attachments, NoteDraftRepository drafts,
    @Value("${gmsr.notes.directory:./data/note-attachments}") String directory) {
   this.notes=notes; this.attachments=attachments; this.drafts=drafts; this.root=Path.of(directory).toAbsolutePath().normalize();
+  this.previews=new NoteImagePreview(root);
  }
  public record Edit(@NotBlank @Size(max=120) String title, @NotBlank @Size(max=50000) String content, boolean pinned, @Size(max=12) List<@NotBlank String> attachmentIds, Long version, String draftId, Long draftVersion) {
   public Edit(String title,String content,boolean pinned,List<String> attachmentIds,Long version) { this(title,content,pinned,attachmentIds,version,null,null); }
@@ -109,6 +111,13 @@ public class NoteController {
  }
  @GetMapping("/attachments/{aid}") public ResponseEntity<Resource> stagedDownload(@PathVariable String aid) {
   return resource(accessibleAttachment(aid));
+ }
+ @GetMapping("/attachments/{aid}/preview") public ResponseEntity<byte[]> preview(@PathVariable String aid) throws IOException {
+  // Recheck access even on a server cache hit (removed notes, private drafts, retired files).
+  NoteAttachment a=accessibleAttachment(aid);
+  var image=previews.load(a.storageKey,a.mediaType);
+  return ResponseEntity.ok().header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
+   .contentType(MediaType.parseMediaType(image.mediaType())).contentLength(image.bytes().length).body(image.bytes());
  }
  @DeleteMapping("/attachments/{aid}") @Transactional public ResponseEntity<Void> discard(@PathVariable String aid) throws IOException {
   NoteAttachment a=publicationAttachment(aid);

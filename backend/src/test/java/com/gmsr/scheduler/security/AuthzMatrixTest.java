@@ -109,6 +109,8 @@ class AuthzMatrixTest {
             Arguments.of("PUT", "/api/notes/1/pin", "admin", 200),
             Arguments.of("POST", "/api/notes/attachments", "anon", 401),
             Arguments.of("GET", "/api/notes/attachments/a", "anon", 401),
+            Arguments.of("GET", "/api/notes/attachments/a/preview", "anon", 401),
+            Arguments.of("GET", "/api/notes/attachments/a/preview", "viewer", 200),
             Arguments.of("DELETE", "/api/notes/attachments/a", "anon", 401),
             Arguments.of("POST", "/api/notes/attachments", "viewer", 200),
             Arguments.of("GET", "/api/notes/attachments/a", "viewer", 200),

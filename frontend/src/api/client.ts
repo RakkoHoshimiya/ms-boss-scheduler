@@ -1,3 +1,4 @@
+import { createNoteBlobCache, type DownloadProgress } from '../features/note-blob-cache';
 import type {
   BossView,
   CharacterView,
@@ -16,12 +17,14 @@ import type {
 
 const TOKEN_KEY = 'gmsr.token';
 const REFRESH_KEY = 'gmsr.refresh';
+const noteBlobs = createNoteBlobCache();
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-export function setToken(token: string | null) {
+export function setToken(token: string | null, preserveImages = false) {
+  if (!preserveImages && token !== getToken()) noteBlobs.clear();
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
@@ -85,7 +88,8 @@ async function refreshAccessToken(): Promise<boolean> {
         clearTokens();
         return false;
       }
-      setTokens(data.token, data.refreshToken ?? null);
+      setToken(data.token, true); // Same account/session: keep its current image transfers alive.
+      setRefreshToken(data.refreshToken ?? null);
       return true;
     } catch {
       return false;
@@ -120,7 +124,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}, retried = false, blob = false): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, retried = false, blob = false, progress?: (value: DownloadProgress) => void): Promise<T> {
   const headers = new Headers(options.headers ?? {});
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -137,7 +141,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     // 用户完全无感知；只有 refresh token 也过期（连续 7 天没用过系统）才会真正掉线。
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      return request<T>(path, options, true, blob);
+      return request<T>(path, options, true, blob, progress);
     }
     clearTokens();
     onUnauthorized?.();
@@ -149,7 +153,23 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
   if (response.status === 204) {
     return undefined as T;
   }
-  if (blob && response.ok) return await response.blob() as T;
+  if (blob && response.ok) {
+    if (!progress || !response.body) return await response.blob() as T;
+    const total = Number(response.headers.get('Content-Length')) || 0;
+    let loaded = 0;
+    const chunks: Uint8Array[] = [];
+    const reader = response.body.getReader();
+    try {
+      progress({ loaded, total });
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        chunks.push(chunk.value); loaded += chunk.value.byteLength; progress({ loaded, total });
+      }
+      progress({ loaded, total: loaded });
+      return new Blob(chunks, { type: response.headers.get('Content-Type') ?? '' }) as T;
+    } finally { reader.releaseLock(); }
+  }
   const text = await response.text();
   const payload = text ? safeParse(text) : null;
   if (!response.ok) {
@@ -351,6 +371,23 @@ export interface NoteAttachment { id: string; name: string; size: number; mediaT
 export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
 export interface NoteDraft { id: string; version?: number; noteId: number | null; sourceVersion: number | null; title: string; content: string; pinned: boolean; updatedAt: string; deletedAt?: string | null; attachments: NoteAttachment[] }
 export type DraftWrite = Omit<NoteDraft, 'attachments' | 'updatedAt' | 'deletedAt'> & { attachmentIds: string[] };
+function noteImage(aid: string, preview: boolean, progress?: (value: DownloadProgress) => void) {
+ const key = `${aid}/${preview ? 'preview' : 'original'}`;
+ const load = noteBlobs.get(key, async (sessionSignal, notify) => {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  sessionSignal.addEventListener('abort', abort, { once: true });
+  if (sessionSignal.aborted) controller.abort();
+  const timeout = setTimeout(abort, 60000);
+  try { return await request<Blob>(`/notes/attachments/${aid}${preview ? '/preview' : ''}`, { signal: controller.signal }, false, true, notify); }
+  catch (error) {
+   if (controller.signal.aborted) throw new Error('图片加载超时或已取消，请重试');
+   throw error;
+  } finally { clearTimeout(timeout); sessionSignal.removeEventListener('abort', abort); }
+ }, progress);
+ // All callers settle; detach progress observers even when a component has disappeared.
+ return { promise: load.promise.finally(load.unsubscribe), unsubscribe: load.unsubscribe };
+}
 export const notesApi = {
  list: () => request<GuideNote[]>('/notes'),
  detail: (id: number) => request<NoteDetail>(`/notes/${id}`),
@@ -366,7 +403,9 @@ export const notesApi = {
  remove: (id: number) => request<void>(`/notes/${id}`, {method:'DELETE'}),
  upload: (id: number, file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>(`/notes/${id}/attachments`, {method:'POST',body}); },
  stage: (file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>('/notes/attachments', {method:'POST',body}); },
- file: (aid: string) => request<Blob>(`/notes/attachments/${aid}`, {}, false, true),
+ image: noteImage,
+ file: (aid: string) => noteImage(aid, false).promise,
+ preview: (aid: string) => noteImage(aid, true).promise,
  discard: (aid: string) => request<void>(`/notes/attachments/${aid}`, {method:'DELETE'}),
  removeFile: (id: number, aid: string) => request<void>(`/notes/${id}/attachments/${aid}`, {method:'DELETE'}),
 };

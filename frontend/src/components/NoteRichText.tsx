@@ -47,7 +47,7 @@ const NoteRichText = forwardRef<NoteRichTextHandle, Props>(function NoteRichText
     const cached = urls.current.get(file.id);
     if (cached) img.src = cached;
     else if (local) display(local);
-    else notesApi.file(file.id).then(display).catch(e => {
+    else notesApi.preview(file.id).then(display).catch(e => {
       if (active.current) { img.alt = `${file.name}（图片加载失败）`; callbacks.current.onError((e as Error).message); }
     });
     return img;

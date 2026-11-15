@@ -87,4 +87,32 @@ class NoteControllerTest {
   login(7);var a=staged("a",7,"image/png");a.retired=true;assertThrows(NotFoundException.class,()->controller.create(new NoteController.Edit("title","text",false,List.of("a"),null)));
   a.retired=false;a.createdAt=java.time.Instant.now().minus(java.time.Duration.ofDays(8));assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));
  }
+ @Test void previewRechecksAccessOnCacheHitAndLeavesOriginalUnchanged() throws Exception {
+  login(7);var a=staged("preview",7,"image/png");a.storageKey="preview.png";
+  var image=new java.awt.image.BufferedImage(1800,2200,java.awt.image.BufferedImage.TYPE_INT_RGB);
+  var random=new Random(7);for(int y=0;y<2200;y++)for(int x=0;x<1800;x++)image.setRGB(x,y,random.nextInt());
+  Path original=directory.resolve(a.storageKey);javax.imageio.ImageIO.write(image,"png",original.toFile());image.flush();
+  byte[] before=Files.readAllBytes(original);
+  var result=controller.preview(a.id);
+  assertEquals("no-store",result.getHeaders().getCacheControl());
+  assertEquals("image/jpeg",result.getHeaders().getContentType().toString());
+  assertEquals(result.getBody().length,result.getHeaders().getContentLength());
+  assertTrue(result.getBody().length<before.length/3,"Preview must substantially reduce the transfer");
+  var decoded=javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(result.getBody()));
+  assertEquals(1600,Math.max(decoded.getWidth(),decoded.getHeight()));decoded.flush();
+  assertArrayEquals(before,Files.readAllBytes(original));
+  assertSame(result.getBody(),controller.preview(a.id).getBody());
+  login(8);assertThrows(NotFoundException.class,()->controller.preview(a.id));
+  login(7);a.retired=true;assertThrows(NotFoundException.class,()->controller.preview(a.id));
+  a.retired=false;a.noteId=1L;notes.findById(1L).orElseThrow().deletedAt=java.time.Instant.now();
+  assertThrows(NotFoundException.class,()->controller.preview(a.id));
+ }
+ @Test void previewRejectsMissingUnsupportedAndUnsafeFiles() throws Exception {
+  login(7);var a=staged("preview",7,"image/png");a.storageKey="missing.png";
+  assertThrows(NotFoundException.class,()->controller.preview(a.id));
+  a.storageKey="../outside.png";assertThrows(NotFoundException.class,()->controller.preview(a.id));
+  a.mediaType="application/octet-stream";assertThrows(BusinessException.class,()->controller.preview(a.id));
+  a.mediaType="image/png";a.storageKey="broken.png";Files.writeString(directory.resolve(a.storageKey),"not an image");
+  assertThrows(BusinessException.class,()->controller.preview(a.id));
+ }
 }

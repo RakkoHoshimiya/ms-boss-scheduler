@@ -3059,6 +3059,9 @@ code.qq {
 .note-attachment { margin:12px 0; }
 .note-attachment img { max-width:100%; max-height:420px; object-fit:contain; border-radius:10px; }
 .note-attachment button { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+.note-attachment-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; }
+.note-image-progress { display:grid; gap:6px; margin:10px 0; color:var(--text-dim); font-size:13px; }
+.note-image-progress progress { width:min(100%,320px); height:7px; accent-color:var(--accent); }
 .note-upload { display:block; padding:16px; border:1px dashed #b9c4d4; border-radius:10px; margin-top:16px; }
 .note-upload input { display:block; margin-top:10px; max-width:100%; }
 .note-error { color:#b93838; padding:12px; background:#fff0f0; border-radius:8px; }
