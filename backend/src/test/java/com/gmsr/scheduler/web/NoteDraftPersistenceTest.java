@@ -50,6 +50,7 @@ class NoteDraftPersistenceTest {
   var a=file();a.createdAt=Instant.now();attachments.saveAndFlush(a);
   String id=UUID.randomUUID().toString();
   var saved=controller.saveDraft(id,new NoteController.DraftEdit(null,null,null,"draft","body",false,List.of(a.id)));
+  assertEquals(drafts.findById(id).orElseThrow().version,saved.version());
   assertTrue(drafts.ownsActiveAttachment(a.id,70001L));assertFalse(drafts.ownsActiveAttachment(a.id,70002L));
   a.createdAt=Instant.now().minus(Duration.ofDays(20));attachments.saveAndFlush(a);
   var cleanup=new NoteAttachmentCleanup(attachments,notes,drafts,manager,directory.toString());cleanup.cleanup();
@@ -58,7 +59,6 @@ class NoteDraftPersistenceTest {
   cleanup.cleanup();assertTrue(drafts.existsById(id));
   d.deletedAt=Instant.now().minus(Duration.ofDays(8));drafts.saveAndFlush(d);cleanup.cleanup();
   assertFalse(drafts.existsById(id));assertFalse(attachments.existsById(a.id));assertFalse(Files.exists(directory.resolve(a.storageKey)));
-  assertEquals(0,saved.version());
  }
  @Test void softDeletedNoteRetainsBodyAndFileUntilExpiry() throws Exception {
   Note n=new Note();n.title="guide";n.content="body";n.updatedAt=Instant.now();n=notes.saveAndFlush(n);
