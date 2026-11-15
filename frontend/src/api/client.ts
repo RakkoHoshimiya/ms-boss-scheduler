@@ -346,13 +346,22 @@ export const api = {
     request<{ username: string; defaultPassword: string }>(`/admin/users/${id}/reset-password`, { method: 'POST' }),
 };
 
-export interface GuideNote { id: number; version: number; title: string; content: string; pinned: boolean; updatedAt: string }
+export interface GuideNote { id: number; version: number; title: string; content: string; pinned: boolean; updatedAt: string; deletedAt?: string | null }
 export interface NoteAttachment { id: string; name: string; size: number; mediaType: string }
 export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
+export interface NoteDraft { id: string; version?: number; noteId: number | null; sourceVersion: number | null; title: string; content: string; pinned: boolean; updatedAt: string; deletedAt?: string | null; attachments: NoteAttachment[] }
+export type DraftWrite = Omit<NoteDraft, 'attachments' | 'updatedAt' | 'deletedAt'> & { attachmentIds: string[] };
 export const notesApi = {
  list: () => request<GuideNote[]>('/notes'),
  detail: (id: number) => request<NoteDetail>(`/notes/${id}`),
- save: (note: Partial<GuideNote> & { attachmentIds?: string[] }) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
+ save: (note: Partial<GuideNote> & { attachmentIds?: string[]; draftId?: string; draftVersion?: number }) => request<GuideNote>(note.id ? `/notes/${note.id}` : '/notes', {method: note.id ? 'PUT' : 'POST', body: JSON.stringify(note)}),
+ trash: () => request<GuideNote[]>('/notes/trash'),
+ restore: (id: number) => request<GuideNote>(`/notes/${id}/restore`, {method:'POST'}),
+ drafts: () => request<NoteDraft[]>('/notes/drafts'),
+ draftTrash: () => request<NoteDraft[]>('/notes/drafts/trash'),
+ saveDraft: (draft: DraftWrite) => request<NoteDraft>(`/notes/drafts/${draft.id}`, {method:'PUT',body:JSON.stringify(draft)}),
+ deleteDraft: (id: string) => request<void>(`/notes/drafts/${id}`, {method:'DELETE'}),
+ restoreDraft: (id: string) => request<NoteDraft>(`/notes/drafts/${id}/restore`, {method:'POST'}),
  pin: (note: GuideNote) => request<GuideNote>(`/notes/${note.id}/pin`, {method:'PUT', body:JSON.stringify({pinned:!note.pinned, version:note.version})}),
  remove: (id: number) => request<void>(`/notes/${id}`, {method:'DELETE'}),
  upload: (id: number, file: File) => { const body=new FormData(); body.append('file',file); return request<NoteAttachment>(`/notes/${id}/attachments`, {method:'POST',body}); },

@@ -65,14 +65,14 @@ jobs:
         working-directory: backend
         run: mvn -B verify
 
-      - name: 校验迁移结果（8 张业务表 + history）
+      - name: 校验迁移结果（14 张业务表 + history）
         run: |
           set -euo pipefail
           TABLES=$(PGPASSWORD=gmsr_ci_pwd psql -h localhost -U gmsr_app -d gmsr -tAc \
             "select count(*) from information_schema.tables
               where table_schema = 'gmsr' and table_name <> 'flyway_schema_history'")
           echo "业务表数量: $TABLES"
-          test "$TABLES" = "9"
+          test "$TABLES" = "14"
           PGPASSWORD=gmsr_ci_pwd psql -h localhost -U gmsr_app -d gmsr -tAc \
             "select version || ' ' || type from gmsr.flyway_schema_history order by installed_rank"
 
@@ -160,6 +160,10 @@ jobs:
       - name: 生产构建
         working-directory: frontend
         run: npm run build
+
+      - name: 图文草稿恢复与排班同步回归
+        working-directory: frontend
+        run: npm run verify:notes && npm run verify:sync
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4

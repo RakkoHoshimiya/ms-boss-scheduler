@@ -1,3 +1,4 @@
+import { usePageSync } from '../hooks/usePageSync';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import type { BossView, RunView } from '../api/types';
@@ -24,6 +25,11 @@ export default function RunsTablePage() {
   /** 完成状态的重置时间（上次 / 下次），用于顶部说明 */
   const [resetInfo, setResetInfo] = useState<{ lastResetAt?: string | null; nextResetAt?: string } | null>(null);
   const [myRunIds, setMyRunIds] = useState<number[]>([]);
+  const [marking, setMarking] = useState(false);
+  const syncNotice = usePageSync(async () => {
+    const [nextRuns, nextBosses, reset, mine] = await Promise.all([api.runs(), api.bosses(), api.statusReset(), user?.playerId ? api.playerRuns(user.playerId) : Promise.resolve([])]);
+    return () => { setRuns(nextRuns); setBosses(nextBosses); setResetInfo(reset); setMyRunIds(mine.map(item => item.runId)); };
+  }, marking, String(user?.id ?? 'public'));
   const load = () => {
     setLoading(true);
     Promise.all([api.runs(), api.bosses()])
@@ -113,13 +119,15 @@ export default function RunsTablePage() {
   );
 
   const markStatus = async (run: RunView, status: 'DONE' | 'PLANNED') => {
+    if (marking) return;
+    setMarking(true);
     try {
       const updated = await api.setRunStatus(run.id, status);
       setRuns((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       notify(status === 'DONE' ? '已标记完成' : '已改回未完成');
     } catch (error) {
       notify(error instanceof Error ? error.message : '标记失败', 'error');
-    }
+    } finally { setMarking(false); }
   };
 
   return (
@@ -178,6 +186,7 @@ export default function RunsTablePage() {
         {loading ? <span className="muted">加载中…</span> : null}
       </div>
 
+      {syncNotice}
       {blocks.map(({ boss, runs: bossRuns, members }) => (
         <div className="card" key={boss.id}>
           <div className="card-title">

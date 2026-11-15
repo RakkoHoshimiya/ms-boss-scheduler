@@ -13,8 +13,9 @@ class NoteControllerTest {
  @TempDir Path directory;
  NoteRepository notes=mock(NoteRepository.class);
  NoteAttachmentRepository files=mock(NoteAttachmentRepository.class);
+ NoteDraftRepository drafts=mock(NoteDraftRepository.class);
  NoteController controller;
- @BeforeEach void setup(){controller=new NoteController(notes,files,directory.toString());Note n=new Note();n.id=1L;when(notes.findById(1L)).thenReturn(Optional.of(n));when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));when(files.findByNoteIdOrderById(1L)).thenReturn(List.of());}
+ @BeforeEach void setup(){controller=new NoteController(notes,files,drafts,directory.toString());Note n=new Note();n.id=1L;when(notes.findById(1L)).thenReturn(Optional.of(n));when(notes.findForUpdate(1L)).thenReturn(Optional.of(n));when(files.findByNoteIdOrderById(1L)).thenReturn(List.of());}
  @Test void uniqueNamesAndSafePath() throws Exception {
   var file=new MockMultipartFile("file","../../guide.txt","text/plain","tips".getBytes());
   var first=controller.upload(1L,file);var second=controller.upload(1L,file);
@@ -49,7 +50,7 @@ class NoteControllerTest {
   assertEquals(44L,image.noteId);assertEquals(44L,footer.noteId);assertEquals("before[[image:image]]after",n.content);
  }
  @Test void rejectsForeignNoteAndNonImageReferences(){
-  login(7);var image=staged("image",7,"image/png");image.noteId=99L;
+  login(7);var image=staged("image",7,"image/png");image.noteId=99L;when(notes.findById(99L)).thenReturn(Optional.of(new Note()));
   assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"), null)));
   staged("pdf",7,"application/octet-stream");assertThrows(BusinessException.class,()->controller.create(new NoteController.Edit("guide","[[image:pdf]]",false,List.of("pdf"), null)));
   verify(notes,never()).saveAndFlush(any());
@@ -59,7 +60,7 @@ class NoteControllerTest {
   assertThrows(IllegalStateException.class,()->controller.create(new NoteController.Edit("guide","[[image:image]]",false,List.of("image"), null)));assertNull(image.noteId);
  }
  @Test void draftQuotaAndCancelProtection(){
-  login(7);when(files.countByNoteIdIsNullAndRetiredFalseAndUploadedByAndCreatedAtAfter(eq(7L),any())).thenReturn(24L);assertThrows(BusinessException.class,()->controller.stage(new MockMultipartFile("file","a.txt","text/plain","tips".getBytes())));
+  login(7);when(files.countByNoteIdIsNullAndRetiredFalseAndUploadedByAndCreatedAtAfter(eq(7L),any())).thenReturn(240L);assertThrows(BusinessException.class,()->controller.stage(new MockMultipartFile("file","a.txt","text/plain","tips".getBytes())));
   var published=staged("image",7,"image/png");published.noteId=1L;assertThrows(BusinessException.class,()->controller.discard("image"));verify(files,never()).delete(any());
  }
  @Test void removedPublishedAttachmentsWaitForSuccessfulSave(){
@@ -80,10 +81,10 @@ class NoteControllerTest {
  }
  @Test void deletingNoteDefersFileDeletionUntilAfterRetention() throws Exception {
   login(7);var a=staged("a",7,"image/png");a.noteId=1L;a.storageKey="a.png";Files.writeString(directory.resolve(a.storageKey),"image");when(files.findByNoteIdOrderById(1L)).thenReturn(List.of(a));
-  controller.delete(1L);assertTrue(a.retired);assertNull(a.noteId);assertTrue(Files.exists(directory.resolve(a.storageKey)));verify(notes).delete(any());
+  controller.delete(1L);assertFalse(a.retired);assertEquals(1L,a.noteId);assertTrue(Files.exists(directory.resolve(a.storageKey)));verify(notes,never()).delete(any());assertNotNull(notes.findForUpdate(1L).orElseThrow().deletedAt);
  }
  @Test void retiredAndExpiredFilesCannotBeReattached(){
   login(7);var a=staged("a",7,"image/png");a.retired=true;assertThrows(NotFoundException.class,()->controller.create(new NoteController.Edit("title","text",false,List.of("a"),null)));
-  a.retired=false;a.createdAt=java.time.Instant.now().minus(java.time.Duration.ofDays(2));assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));
+  a.retired=false;a.createdAt=java.time.Instant.now().minus(java.time.Duration.ofDays(8));assertThrows(NotFoundException.class,()->controller.stagedDownload("a"));
  }
 }

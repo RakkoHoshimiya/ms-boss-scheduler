@@ -34,6 +34,15 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 
 export const CHANGE_LOG: ChangeGroup[] = [
   {
+    date: '11/15',
+    title: '攻略草稿恢复、七天回收站与排班自动同步',
+    entries: [
+      { type: 'feature', text: '攻略编辑自动保存为仅自己可见的草稿，并保留本机恢复副本；误刷新后可继续编辑文字与已上传图片' },
+      { type: 'feature', text: '删除的攻略和草稿进入回收站，7 天内可恢复；到期清理正文及不再被使用的附件' },
+      { type: 'improve', text: '切回网页时自动获取最新车次与名单；正在编辑、拖拽或调车时暂缓同步，结束后再更新，保留当前输入' },
+    ],
+  },
+  {
     date: '11/13',
     title: '修复每周状态重置没有执行',
     entries: [

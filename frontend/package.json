@@ -16,7 +16,8 @@
     "verify:volume-ui": "node verify-volume-ui.mjs",
     "verify:myruns-sort": "node --experimental-strip-types verify-myruns-sort.mjs",
     "verify:layout-switch": "node verify-layout-switch.mjs",
-    "verify:notes": "node --experimental-strip-types verify-note-content.mjs && node verify-note-compose.mjs"
+    "verify:sync": "node verify-page-sync.mjs",
+    "verify:notes": "node --experimental-strip-types verify-note-content.mjs && node --experimental-strip-types verify-note-drafts.mjs && node verify-note-compose.mjs"
   },
   "dependencies": {
     "livekit-client": "^2.22.4",

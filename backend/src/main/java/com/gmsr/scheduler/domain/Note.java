@@ -8,4 +8,5 @@ public class Note {
  @Column(nullable=false,columnDefinition="text") public String content;
  @Column(nullable=false) public boolean pinned;
  @Column(nullable=false) public java.time.Instant updatedAt;
+ public java.time.Instant deletedAt;
 }

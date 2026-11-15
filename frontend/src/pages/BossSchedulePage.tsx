@@ -1,3 +1,4 @@
+import { usePageSync } from '../hooks/usePageSync';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { api } from '../api/client';
 import { useDevice } from '../components/DeviceContext';
@@ -131,6 +132,20 @@ export default function BossSchedulePage() {
     () => (currentCombo.length > 0 ? currentCombo.map((b) => b.id) : currentBoss ? [currentBoss.id] : []),
     [currentCombo, currentBoss],
   );
+
+  const syncNotice = usePageSync(async () => {
+    const [bossList, groupList, playerList, allRuns] = await Promise.all([api.bosses(), api.groups(), api.players(), api.runs()]);
+    const ids = viewBossIds;
+    return () => {
+      setBosses(bossList); setGroups(groupList); setPlayers(playerList);
+      if (currentBoss) {
+        const updated = bossList.find(b => b.id === currentBoss.id);
+        setCurrentBoss(updated ?? null);
+        setCurrentCombo(updated?.comboKey ? bossList.filter(b => b.comboKey === updated.comboKey) : []);
+      }
+      setRuns(allRuns.filter(run => ids.includes(run.bossId))); setRunsLoadedFor(ids.join(','));
+    };
+  }, busy || Boolean(bossForm || runForm || drag || touchSelected || newGroupName.trim()), viewBossIds.join(','));
 
   useEffect(() => {
     if (viewBossIds.length > 0) {
@@ -919,6 +934,7 @@ export default function BossSchedulePage() {
     const boss = bosses.find((b) => b.id === currentBoss.id) ?? currentBoss;
     return (
       <div>
+        {syncNotice}
         <div className="page-head">
           <button className="btn" onClick={() => setCurrentBoss(null)}>
             ← 返回 BOSS 列表
@@ -1351,6 +1367,7 @@ export default function BossSchedulePage() {
   // ---------------- BOSS 列表 ----------------
   return (
     <div>
+      {syncNotice}
       <div className="page-head">
         <h1>boss排班</h1>
         <span className="sub">

@@ -1,3 +1,4 @@
+import { usePageSync } from '../hooks/usePageSync';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
@@ -19,6 +20,11 @@ export default function MyRunsPage() {
   /** 全部 BOSS（判断哪些属于融合车） */
   const [bosses, setBosses] = useState<BossView[]>([]);
 
+  const [marking, setMarking] = useState(false);
+  const syncNotice = usePageSync(async () => {
+    const [mine, all, bossList, playerList] = await Promise.all([user?.playerId ? api.playerRuns(user.playerId) : Promise.resolve([]), api.runs(), api.bosses(), api.players()]);
+    return () => { setMyRuns(mine); setRuns(all); setBosses(bossList); setPlayers(playerList); };
+  }, marking, String(user?.id ?? 'public'));
   const load = () => {
     if (!user?.playerId) {
       setMyRuns([]);
@@ -57,6 +63,8 @@ export default function MyRunsPage() {
    * 否则群友得为同一趟车连点 7 次「已完成」，而且只点一次时其它页面还显示未完成。
    */
   const mark = async (runIds: number[], status: 'DONE' | 'PLANNED') => {
+    if (marking) return;
+    setMarking(true);
     try {
       const updatedStatuses: Array<{ id: number; status: PlayerRunView['status'] }> = [];
       for (const runId of runIds) {
@@ -72,7 +80,7 @@ export default function MyRunsPage() {
     } catch (error) {
       notify(error instanceof Error ? error.message : '标记失败', 'error');
       load();
-    }
+    } finally { setMarking(false); }
   };
 
   /** 融合车合并后的展示项：一趟车只出一条，不再按成员 BOSS 拆成 7 条 */
@@ -159,6 +167,7 @@ export default function MyRunsPage() {
         )}
       </div>
 
+      {syncNotice}
       {/* 快速筛选：按角色 / 按 BOSS（可叠加，只列真的排到的） */}
       {user?.playerId && mergedRuns.length > 0 ? (
         <div className="toolbar" style={{ marginTop: -6 }}>

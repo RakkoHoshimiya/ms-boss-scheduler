@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { cachedDrafts, cacheDraft, forgetDraft, mergeDrafts } from './src/features/note-drafts.ts';
+
+const values = new Map();
+globalThis.localStorage = { get length() { return values.size; }, key: i => [...values.keys()][i], getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+const draft = { id: crypto.randomUUID(), title: 'draft', content: 'unsaved', noteId: null, sourceVersion: null, attachments: [], pinned: false, updatedAt: '2026-11-15T01:00:00Z' };
+assert(cacheDraft(7, draft)); assert.equal(cachedDrafts(7).length, 1); assert.equal(cachedDrafts(8).length, 0);
+assert.deepEqual(mergeDrafts([], cachedDrafts(7), []), [draft]);
+const cloud = { ...draft, version: 2, updatedAt: '2026-11-15T01:01:00Z' };
+const local = { ...draft, version: 1, updatedAt: '2026-11-15T01:02:00Z' };
+cacheDraft(7, local);
+const recovered = mergeDrafts([cloud], [local], [], 7);
+assert.equal(recovered.length, 2); assert.deepEqual(recovered.find(d => d.id === cloud.id), cloud);
+assert.equal(recovered.find(d => d.id !== cloud.id).version, undefined);
+assert(recovered.find(d => d.id !== cloud.id).title.includes('恢复副本'));
+assert.equal(mergeDrafts([], [local], [{ ...cloud, deletedAt: '2026-11-15T01:03:00Z' }], 7).length, 0);
+assert.equal(mergeDrafts([], [cloud], []).length, 0, 'Purged or published cloud drafts must not resurrect');
+forgetDraft(7, draft.id); assert.equal(cachedDrafts(8).length, 0);
+globalThis.localStorage.setItem = () => { throw new Error('Storage unavailable'); };
+assert.equal(cacheDraft(7, draft), false);
+console.log('NOTE_DRAFTS_PASS: account isolation, local recovery, separate conflict copy, deletion tombstones and unavailable storage');
