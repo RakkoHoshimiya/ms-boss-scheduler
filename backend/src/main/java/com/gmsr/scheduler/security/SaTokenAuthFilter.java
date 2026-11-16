@@ -174,7 +174,7 @@ public class SaTokenAuthFilter extends OncePerRequestFilter {
         AppUser user = userRepository.findById(userId).orElse(null);
         if (user == null || !user.isEnabled()) {
             // 账号已被删除或禁用 → 立即失效（旧 JWT 实现做不到这一点）
-            StpUtil.logout(userId);
+            revokeCurrentToken();
             return;
         }
         /**
@@ -188,14 +188,18 @@ public class SaTokenAuthFilter extends OncePerRequestFilter {
          */
         long sessionVersion;
         try {
-            Object stored = StpUtil.getSessionByLoginId(userId, false)
+            // A login-id session is shared by all devices. Writing a fresh version there
+            // would revive an old token left behind by a failed Redis revocation.
+            Object stored = StpUtil.getTokenSession()
                     .get(com.gmsr.scheduler.service.AuthService.SESSION_VERSION_KEY);
             sessionVersion = stored == null ? 0L : Long.parseLong(String.valueOf(stored));
         } catch (Exception ex) {
-            sessionVersion = 0L;
+            // A storage failure is not the same as a legacy token with version zero.
+            // Without the token's recorded version, do not authenticate even a version-0 user.
+            return;
         }
         if (sessionVersion != user.getSessionVersion()) {
-            StpUtil.logout(userId);
+            revokeCurrentToken();
             return;
         }
 
@@ -212,5 +216,13 @@ public class SaTokenAuthFilter extends OncePerRequestFilter {
         var auth = new UsernamePasswordAuthenticationToken(String.valueOf(user.getId()), null, authorities);
         auth.setDetails(details);
         SecurityContextHolder.getContext().setAuthentication(auth);
+    }
+
+    private static void revokeCurrentToken() {
+        try {
+            StpUtil.logoutByTokenValue(StpUtil.getTokenValue());
+        } catch (Exception ignored) {
+            // Still reject this request if Redis cannot remove the already-invalid token.
+        }
     }
 }

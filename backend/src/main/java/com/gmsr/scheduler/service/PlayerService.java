@@ -113,6 +113,9 @@ public class PlayerService {
 
     @Transactional
     public PlayerView update(Long id, PlayerRequest request) {
+        // Account writes use user -> player lock order, including the rename path, so a
+        // concurrent password reset cannot be overwritten by a stale account snapshot.
+        var boundUser = userRepository.findByPlayerIdForUpdate(id);
         Player player = playerRepository.findById(id).orElseThrow(() -> new NotFoundException("群友不存在：" + id));
         String nickname = request.nickname().trim();
         playerRepository.findByNickname(nickname).ifPresent(other -> {
@@ -132,7 +135,7 @@ public class PlayerService {
         }
         playerRepository.save(player);
         // 群友名就是账号显示名：这里改了，账号列表 / 侧栏也要跟着变
-        userRepository.findByPlayerId(id).ifPresent(user -> {
+        boundUser.ifPresent(user -> {
             if (!nickname.equals(user.getDisplayName())) {
                 user.setDisplayName(nickname);
                 userRepository.save(user);

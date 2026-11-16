@@ -14,8 +14,6 @@ import com.gmsr.scheduler.repository.PlayerRepository;
 import com.gmsr.scheduler.security.LoginAttemptService;
 import com.gmsr.scheduler.security.RefreshTokenService;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,8 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** 登录与用户管理。 */
 @Service
 public class AuthService {
-
-    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     /** SA-Token 会话里存「会话版本」的键；过滤器会用它校验 access token 是否已因改密失效 */
     public static final String SESSION_VERSION_KEY = "sessionVersion";
@@ -76,7 +72,7 @@ public class AuthService {
         // SA-Token 建立服务端会话：access token 2 小时，刷新由 refresh token 负责
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
         // 会话里记下当前版本，过滤器每次请求都会拿它和数据库比对
-        cn.dev33.satoken.stp.StpUtil.getSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
+        cn.dev33.satoken.stp.StpUtil.getTokenSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
         String accessToken = cn.dev33.satoken.stp.StpUtil.getTokenValue();
         String refreshToken = refreshTokenService.issue(user.getId(), user.getSessionVersion());
         return new LoginResponse(
@@ -93,22 +89,12 @@ public class AuthService {
      * 改密码 / 重置密码 / 禁用账号 / 改动权限 / 删除账号时都要调用 ——
      * 手写 JWT 时代做不到这一点（撤销后旧 token 仍能用满 7 天）。
      */
-    private void kickOut(Long userId) {
-        if (userId == null) {
-            return;
-        }
-        // 先把会话版本 +1（拿账号行锁，与「刷新会话」串行化）。
-        // 否则存在这个窗口：刷新已消费旧 token → 这里撤销 → 刷新接着签出新会话，绕过撤销。
-        try {
-            userRepository.findByIdForUpdate(userId).ifPresent(user -> {
-                user.setSessionVersion(user.getSessionVersion() + 1);
-                userRepository.save(user);
-            });
-        } catch (Exception ex) {
-            // 拿不到锁也要继续踢人：撤销会话比递增版本更重要
-            log.warn("递增会话版本失败（继续撤销会话）：{}", ex.getMessage());
-        }
-        revokeSessions(userId);
+    private void kickOut(AppUser user) {
+        // The caller locks the user before reading or changing any fields. Do not swallow a
+        // version-write failure: the account change and its revocation must commit together.
+        user.setSessionVersion(user.getSessionVersion() + 1);
+        userRepository.save(user);
+        revokeSessions(user.getId());
     }
 
     /** 只撤销会话，不碰数据库（账号已被删除时用）。 */
@@ -141,7 +127,7 @@ public class AuthService {
             throw new BusinessException("登录已失效，请重新登录");
         }
         cn.dev33.satoken.stp.StpUtil.login(user.getId());
-        cn.dev33.satoken.stp.StpUtil.getSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
+        cn.dev33.satoken.stp.StpUtil.getTokenSession().set(SESSION_VERSION_KEY, user.getSessionVersion());
         return new LoginResponse(
                 cn.dev33.satoken.stp.StpUtil.getTokenValue(),
                 refreshTokenService.issue(user.getId(), user.getSessionVersion()),
@@ -179,14 +165,14 @@ public class AuthService {
 
     @Transactional
     public void changePassword(Long userId, ChangePasswordRequest request) {
-        AppUser user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("用户不存在"));
+        AppUser user = userRepository.findByIdForUpdate(userId).orElseThrow(() -> new NotFoundException("用户不存在"));
         if (!passwordEncoder.matches(request.oldPassword(), user.getPasswordHash())) {
             throw new BusinessException("原密码不正确");
         }
         validatePassword(request.newPassword());
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         // 改密后强制所有设备重新登录（安全加固）
-        kickOut(userId);
+        kickOut(user);
         user.setMustChangePassword(false);
         userRepository.save(user);
     }
@@ -194,10 +180,10 @@ public class AuthService {
     /** 管理员把群友密码重置为默认密码，并要求本人下次登录后自行修改。 */
     @Transactional
     public ResetPasswordResponse resetPassword(Long userId) {
-        AppUser user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("用户不存在：" + userId));
+        AppUser user = userRepository.findByIdForUpdate(userId).orElseThrow(() -> new NotFoundException("用户不存在：" + userId));
         user.setPasswordHash(passwordEncoder.encode(defaultPassword));
         // 重置密码后踢掉该账号现有登录态
-        kickOut(userId);
+        kickOut(user);
         user.setMustChangePassword(true);
         userRepository.save(user);
         return new ResetPasswordResponse(user.getUsername(), "密码已重置，请通知本人尽快登录并设置新密码");
@@ -238,9 +224,16 @@ public class AuthService {
      */
     @Transactional
     public UserView updateUser(Long id, UserUpdateRequest request) {
-        AppUser user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("用户不存在：" + id));
+        List<AppUser> administrators = userRepository.findByRoleForUpdate(AppUser.Role.ADMIN);
+        AppUser user = userRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("用户不存在：" + id));
+        AppUser.Role nextRole = request.role() == null ? user.getRole() : parseRole(request.role());
+        boolean nextEnabled = request.enabled() == null ? user.isEnabled() : request.enabled();
+        boolean nextCanSchedule = request.canSchedule() == null ? user.isCanSchedule() : request.canSchedule();
+        protectLastAdministrator(user, nextRole, nextEnabled, administrators);
+        boolean accessChanged = nextRole != user.getRole() || nextEnabled != user.isEnabled()
+                || nextCanSchedule != user.isCanSchedule();
         String displayName = request.displayName().trim();
-        ensureDisplayNameAvailable(displayName, id);
+        ensureDisplayNameAvailable(displayName, user);
         user.setDisplayName(displayName);
         if (request.role() != null) {
             user.setRole(parseRole(request.role()));
@@ -267,10 +260,10 @@ public class AuthService {
             passwordChanged = true;
         }
         userRepository.save(user);
-        if (passwordChanged) {
+        if (passwordChanged || accessChanged) {
             // 改密码必须吊销已有会话，否则旧 access/refresh token 仍能用
             // （以前只有「重置密码」那条路径做了，编辑接口漏了）
-            kickOut(id);
+            kickOut(user);
         }
         return toView(user);
     }
@@ -279,18 +272,15 @@ public class AuthService {
      * 显示名查重：账号表按 displayName 唯一（界面口径），群友表按 nickname 唯一（数据库约束）。
      * 两者都要查，否则要么撞唯一键 500，要么出现两个同名账号。
      */
-    private void ensureDisplayNameAvailable(String displayName, Long selfUserId) {
+    private void ensureDisplayNameAvailable(String displayName, AppUser self) {
         userRepository.findAll().stream()
-                .filter(other -> !other.getId().equals(selfUserId))
+                .filter(other -> !other.getId().equals(self.getId()))
                 .filter(other -> displayName.equals(other.getDisplayName()))
                 .findFirst()
                 .ifPresent(other -> {
                     throw new BusinessException("显示名称「" + displayName + "」已经被占用了，换一个吧");
                 });
-        boolean isSelfPlayer = userRepository.findById(selfUserId)
-                .map(AppUser::getPlayer)
-                .map(player -> player != null && displayName.equals(player.getNickname()))
-                .orElse(false);
+        boolean isSelfPlayer = self.getPlayer() != null && displayName.equals(self.getPlayer().getNickname());
         if (isSelfPlayer) {
             return;
         }
@@ -307,15 +297,23 @@ public class AuthService {
 
     @Transactional
     public void deleteUser(Long id) {
-        AppUser user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("用户不存在：" + id));
-        if (user.getRole() == AppUser.Role.ADMIN && userRepository.findAll().stream()
-                .filter(u -> u.getRole() == AppUser.Role.ADMIN)
-                .count() <= 1) {
-            throw new BusinessException("至少保留一个管理员账号");
-        }
+        List<AppUser> administrators = userRepository.findByRoleForUpdate(AppUser.Role.ADMIN);
+        AppUser user = userRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("用户不存在：" + id));
+        protectLastAdministrator(user, AppUser.Role.VIEWER, false, administrators);
         userRepository.delete(user);
         // 账号已删除，不需要递增版本（刷新时会因为找不到账号被拒），只清会话
         revokeSessions(id);
+    }
+
+    private void protectLastAdministrator(AppUser user, AppUser.Role nextRole, boolean nextEnabled,
+                                         List<AppUser> administrators) {
+        if (user.getRole() != AppUser.Role.ADMIN || !user.isEnabled()
+                || (nextRole == AppUser.Role.ADMIN && nextEnabled)) {
+            return;
+        }
+        if (administrators.stream().noneMatch(other -> !other.getId().equals(user.getId()) && other.isEnabled())) {
+            throw new BusinessException("至少保留一个已启用的管理员账号");
+        }
     }
 
     private static void validatePassword(String password) {
@@ -341,7 +339,7 @@ public class AuthService {
      */
     @Transactional
     public UserView updateOwnDisplayName(Long userId, String displayName) {
-        AppUser user = userRepository.findById(userId)
+        AppUser user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在：" + userId));
         String name = displayName == null ? "" : displayName.trim();
         if (name.isEmpty()) {

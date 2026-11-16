@@ -1,6 +1,7 @@
 package com.gmsr.scheduler.service;
 
 import com.gmsr.scheduler.domain.Boss;
+import com.gmsr.scheduler.domain.BossCombo;
 import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.domain.BossTier;
 import com.gmsr.scheduler.domain.GameCharacter;
@@ -84,6 +85,9 @@ public class RunService {
         run.setBoss(boss);
         run.setTier(requireAllowedTier(boss, request.tier() == null ? boss.getTier().name() : request.tier()));
         BossTier tier = run.getTier();
+        requireComboTier(boss, tier);
+        List<Boss> targets = comboMembers(boss);
+        for (Boss target : targets) requireAllowedTier(target, tier.name());
         int runIndex = request.runIndex() == null ? nextRunIndex(boss, tier) : request.runIndex();
         String comboKey = boss.getComboKey();
 
@@ -94,7 +98,7 @@ public class RunService {
          * 所以这里一次性把同一融合车的所有成员都建上。
          */
         BossRun created = null;
-        for (Boss target : comboMembers(boss)) {
+        for (Boss target : targets) {
             BossRun row = new BossRun();
             row.setBoss(target);
             row.setTier(tier);
@@ -114,12 +118,35 @@ public class RunService {
 
     @Transactional
     public RunView update(Long id, RunRequest request) {
-        // 加锁：改绑 BOSS 会改变允许的容量，必须和「加人」串行化
-        BossRun run = runRepository.findByIdForUpdate(id)
+        BossRun run = runRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("车次不存在：" + id));
+        BossTier originalTier = run.getTier();
+        int originalIndex = run.getRunIndex();
+        String originalCombo = run.getBoss().getComboKey();
+        // Locate the original trip before changing its identity. Lock all rows in id order,
+        // rather than locking one sibling first and deadlocking with another sibling editor.
+        List<BossRun> trip = comboTrip(run);
+        if (trip.stream().noneMatch(row -> row.getId().equals(id))) {
+            throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
+        }
+        lockTrip(trip);
+        for (BossRun target : trip) {
+            entityManager.refresh(target);
+            if (target.getTier() != originalTier || target.getRunIndex() != originalIndex
+                    || !java.util.Objects.equals(target.getBoss().getComboKey(), originalCombo)) {
+                throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
+            }
+        }
+        Set<Long> originalIds = trip.stream().map(BossRun::getId).collect(Collectors.toSet());
+        if (!originalIds.equals(comboTrip(run).stream().map(BossRun::getId).collect(Collectors.toSet()))) {
+            throw new ConflictException("融合车成员刚刚有变动，请刷新后重试");
+        }
         if (request.bossId() != null && !request.bossId().equals(run.getBoss().getId())) {
             Boss boss = bossRepository.findById(request.bossId())
                     .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
+            if (comboGuard.isCombo(run) || comboGuard.isCombo(boss)) {
+                throw new BusinessException("融合车不能单独改绑 BOSS，请保留整组车次关系");
+            }
             // 应用层先给出友好提示（数据库触发器 trg_run_rebind_capacity 是兜底）
             long members = memberRepository.countByRunId(id);
             if (members > boss.getCapacity()) {
@@ -128,18 +155,22 @@ public class RunService {
             }
             run.setBoss(boss);
         }
-        if (request.tier() != null) {
-            run.setTier(requireAllowedTier(run.getBoss(), request.tier()));
+        BossTier tier = request.tier() == null ? run.getTier() : BossService.parseTier(request.tier());
+        for (BossRun target : trip) {
+            requireAllowedTier(target.getBoss(), tier.name());
+            requireComboTier(target.getBoss(), tier);
         }
-        if (request.runIndex() != null) {
-            run.setRunIndex(request.runIndex());
+        BossRun.Status status = request.status() == null ? null : BossRun.Status.valueOf(request.status());
+        for (BossRun target : trip) {
+            target.setTier(tier);
+            if (request.runIndex() != null) target.setRunIndex(request.runIndex());
+            if (status != null) target.setStatus(status);
         }
+        // Time and notes remain per-BOSS metadata; changing trip identity or completion
+        // must not silently overwrite a sibling's own description.
         run.setScheduled(request.scheduled());
-        if (request.status() != null) {
-            run.setStatus(BossRun.Status.valueOf(request.status()));
-        }
         run.setNote(request.note());
-        runRepository.save(run);
+        runRepository.saveAll(trip);
         return get(id);
     }
 
@@ -672,6 +703,13 @@ public class RunService {
                     allowed.stream().map(name -> BossTier.valueOf(name).label()).toList()));
         }
         return parsed;
+    }
+
+    private static void requireComboTier(Boss boss, BossTier tier) {
+        BossCombo.Combo definition = BossCombo.byKey(boss.getComboKey());
+        if (definition != null && !definition.tier().equals(tier.name())) {
+            throw new BusinessException("「" + definition.name() + "」难度固定为 " + definition.tier());
+        }
     }
 
     /** 这趟车我上了哪些角色。 */

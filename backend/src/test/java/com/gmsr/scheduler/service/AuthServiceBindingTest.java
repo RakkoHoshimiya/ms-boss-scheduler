@@ -89,7 +89,7 @@ class AuthServiceBindingTest {
     @DisplayName("编辑账号（只改显示名）不得解绑群友 —— 这是之前线上静默丢绑定的根因")
     void updateUserKeepsPlayerBinding() {
         AppUser user = boundUser(1L, "123456789", "群友A", "群友A");
-        when(userRepository.findById(1L)).thenReturn(java.util.Optional.of(user));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(java.util.Optional.of(user));
         when(userRepository.findAll()).thenReturn(java.util.List.of(user));
         when(playerRepository.findByNickname("群友A2")).thenReturn(java.util.Optional.empty());
 
@@ -108,7 +108,7 @@ class AuthServiceBindingTest {
     @DisplayName("编辑账号（重置密码）同样不得解绑群友")
     void passwordResetKeepsBinding() {
         AppUser user = boundUser(2L, "223456789", "群友B", "群友B");
-        when(userRepository.findById(2L)).thenReturn(java.util.Optional.of(user));
+        when(userRepository.findByIdForUpdate(2L)).thenReturn(java.util.Optional.of(user));
         when(userRepository.findAll()).thenReturn(java.util.List.of(user));
 
         authService.updateUser(2L, new UserUpdateRequest("群友B", null, true, true, "new-password-123"));
@@ -124,7 +124,7 @@ class AuthServiceBindingTest {
         Player other = new Player();
         other.setId(99L);
         other.setNickname("群友Z");
-        when(userRepository.findById(3L)).thenReturn(java.util.Optional.of(user));
+        when(userRepository.findByIdForUpdate(3L)).thenReturn(java.util.Optional.of(user));
         when(userRepository.findAll()).thenReturn(java.util.List.of(user));
         when(playerRepository.findByNickname("群友Z")).thenReturn(java.util.Optional.of(other));
 

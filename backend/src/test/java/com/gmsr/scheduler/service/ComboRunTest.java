@@ -20,6 +20,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
  * 融合车（combo）的趟次一致性。
@@ -55,6 +56,8 @@ class ComboRunTest {
 
     @Autowired
     private RunService runService;
+    @MockitoSpyBean
+    private ComboGuard comboGuard;
     @Autowired
     private BossRepository bossRepository;
     @Autowired
@@ -235,6 +238,79 @@ class ComboRunTest {
                                 "「" + b.getName() + "」的状态应同步为已完成"));
             }
         } finally {
+            cleanup(f);
+        }
+    }
+
+    @Test
+    @DisplayName("编辑融合车序号与完成状态：同趟全部成员保持对齐，后续加人仍覆盖整组")
+    void editingComboIdentityKeepsSubsequentMemberOperationsAligned() {
+        Fixture f = createFixture("COMBOEDIT" + System.currentTimeMillis());
+        try {
+            var original = runService.create(new RunRequest(f.combo().getFirst().getId(), "H", null, null, null, null));
+            runService.update(original.id(), new RunRequest(original.bossId(), "H", 3, "Friday", "DONE", "updated"));
+            for (Boss boss : f.combo()) {
+                var row = runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).getFirst();
+                assertEquals(3, row.getRunIndex());
+                assertEquals(BossRun.Status.DONE, row.getStatus());
+            }
+            runService.addMember(original.id(), new com.gmsr.scheduler.dto.RunDtos.MemberRequest(f.charId(), null, null, null, null));
+            for (Boss boss : f.combo()) {
+                var row = runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).getFirst();
+                assertTrue(memberRepository.findByRunIdAndCharacterId(row.getId(), f.charId()).isPresent());
+            }
+        } finally {
+            cleanup(f);
+        }
+    }
+
+    @Test
+    @DisplayName("融合车不能通过单条车次编辑改绑普通 BOSS")
+    void editingComboCannotDetachOneBoss() {
+        Fixture f = createFixture("COMBOREBIND" + System.currentTimeMillis());
+        try {
+            var original = runService.create(new RunRequest(f.combo().getFirst().getId(), "H", null, null, null, null));
+            org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () -> runService.update(original.id(),
+                    new RunRequest(f.plain().getId(), "H", 1, null, null, null)));
+            assertEquals(f.combo().getFirst().getId(), runService.get(original.id()).bossId());
+            for (Boss boss : f.combo()) assertEquals(1, runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).size());
+        } finally {
+            cleanup(f);
+        }
+    }
+
+    @Test
+    @DisplayName("迟到编辑读到旧趟号时，不得把已经改号的融合车拆为单条")
+    void delayedEditorRejectsAConcurrentTripIdentityChange() throws Exception {
+        Fixture f = createFixture("COMBOLATE" + System.currentTimeMillis());
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        var located = new java.util.concurrent.CountDownLatch(1);
+        var resume = new java.util.concurrent.CountDownLatch(1);
+        var worker = new java.util.concurrent.atomic.AtomicReference<Thread>();
+        var paused = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            var original = runService.create(new RunRequest(f.combo().getFirst().getId(), "H", null, null, null, null));
+            org.mockito.Mockito.doAnswer(invocation -> {
+                if (Thread.currentThread() == worker.get() && paused.compareAndSet(false, true)) {
+                    located.countDown();
+                    assertTrue(resume.await(10, java.util.concurrent.TimeUnit.SECONDS));
+                }
+                return invocation.callRealMethod();
+            }).when(comboGuard).tripOf(org.mockito.ArgumentMatchers.any(BossRun.class));
+            var delayed = executor.submit(() -> {
+                worker.set(Thread.currentThread());
+                org.junit.jupiter.api.Assertions.assertThrows(ConflictException.class, () -> runService.update(original.id(),
+                        new RunRequest(original.bossId(), "H", 3, null, null, null)));
+            });
+            assertTrue(located.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            runService.update(original.id(), new RunRequest(original.bossId(), "H", 2, null, null, null));
+            resume.countDown();
+            delayed.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            for (Boss boss : f.combo()) assertEquals(2,
+                    runRepository.findByBossIdOrderByRunIndexAsc(boss.getId()).getFirst().getRunIndex());
+        } finally {
+            resume.countDown();executor.shutdownNow();
+            org.mockito.Mockito.reset(comboGuard);
             cleanup(f);
         }
     }

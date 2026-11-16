@@ -165,6 +165,10 @@ public class NoteController {
   Path path=root.resolve(a.storageKey); Files.createDirectories(path.getParent());
   try { file.transferTo(path); attachments.saveAndFlush(a); }
   catch(Exception e) { Files.deleteIfExists(path); throw e; }
+  deleteOnRollback(path);
+  return view(a);
+ }
+ private void deleteOnRollback(Path path) {
   if(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
    org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
     @Override public void afterCompletion(int status) {
@@ -172,7 +176,6 @@ public class NoteController {
     }
    });
   }
-  return view(a);
  }
  private NoteAttachment attachment(Long id,String aid) {
   note(id);
@@ -215,6 +218,41 @@ public class NoteController {
  }
  @GetMapping("/drafts/trash") @Transactional(readOnly=true) public List<DraftView> draftTrash() {
   return drafts.findByOwnerIdAndCompletedFalseAndDeletedAtAfterOrderByDeletedAtDesc(draftOwner(),Instant.now().minus(Duration.ofDays(7))).stream().map(this::draftView).toList();
+ }
+ @PostMapping("/drafts/fork") @Transactional(rollbackFor=IOException.class) public DraftView forkDraft(@Valid @RequestBody DraftEdit e) throws IOException {
+  Long owner=draftOwner();
+  if(drafts.countByOwnerIdAndDeletedAtIsNull(owner)>=20) throw new BusinessException("最多保留 20 份草稿，请先整理草稿箱");
+  if(new HashSet<>(e.attachmentIds()).size()!=e.attachmentIds().size()) throw new BusinessException("附件不能重复");
+  if(attachments.countByNoteIdIsNullAndRetiredFalseAndUploadedByAndCreatedAtAfter(owner,Instant.now().minus(Duration.ofDays(7)))+e.attachmentIds().size()>240) {
+   throw new BusinessException("待发布附件过多，请先整理草稿和未使用附件");
+  }
+  var locked=lockAttachments(e.attachmentIds());
+  List<NoteAttachment> selected=e.attachmentIds().stream().sorted().map(id->checkAttachmentAccess(locked.get(id))).toList();
+  var marker=java.util.regex.Pattern.compile("\\[\\[image:([a-zA-Z0-9-]+)\\]\\]").matcher(e.content());
+  while(marker.find()) { String aid=marker.group(1); if(selected.stream().noneMatch(a->a.id.equals(aid) && a.mediaType.startsWith("image/"))) throw new BusinessException("正文图片不存在，请重新添加"); }
+  NoteDraft copy=new NoteDraft();copy.id=UUID.randomUUID().toString();copy.ownerId=owner;
+  copy.title=e.title();copy.content=e.content();copy.pinned=e.pinned();copy.updatedAt=Instant.now();
+  List<Path> created=new ArrayList<>();
+  try {
+   for(NoteAttachment source:selected) {
+    Path original=root.resolve(source.storageKey).normalize();
+    if(!original.startsWith(root) || original.equals(root) || !Files.isRegularFile(original)) throw new NotFoundException("附件文件不存在");
+    NoteAttachment a=new NoteAttachment();a.id=UUID.randomUUID().toString();a.name=source.name;a.mediaType=source.mediaType;
+    a.uploadedBy=owner;a.createdAt=Instant.now();
+    String ext=source.name.contains(".")?source.name.substring(source.name.lastIndexOf('.')+1).toLowerCase(Locale.ROOT):"bin";
+    if(!ext.matches("[a-z0-9]{1,10}")) ext="bin";
+    a.storageKey=LocalDate.now(ZoneId.of("Asia/Shanghai")).toString().replace('-','/')+"/attachment-"+a.id+"."+ext;
+    Path target=root.resolve(a.storageKey);Files.createDirectories(target.getParent());
+    try(var output=Files.newOutputStream(target,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE)) { created.add(target);Files.copy(original,output); }
+    deleteOnRollback(target);a.size=Files.size(target);attachments.saveAndFlush(a);copy.attachments.add(a);
+    copy.content=copy.content.replace("[[image:"+source.id+"]]","[[image:"+a.id+"]]");
+   }
+   // It is a new private draft, independent of a stale, deleted or already-published source.
+   return draftView(drafts.saveAndFlush(copy));
+  } catch(IOException | RuntimeException ex) {
+   for(Path path:created) try { Files.deleteIfExists(path); } catch(IOException cleanup) { ex.addSuppressed(cleanup); }
+   throw ex;
+  }
  }
  @PutMapping("/drafts/{id}") @Transactional public DraftView saveDraft(@PathVariable String id,@Valid @RequestBody DraftEdit e) {
   try { if(!UUID.fromString(id).toString().equals(id)) throw new IllegalArgumentException(); }

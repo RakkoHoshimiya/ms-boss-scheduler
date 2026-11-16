@@ -3,7 +3,6 @@ package com.gmsr.scheduler.security;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
@@ -98,7 +97,8 @@ class SaTokenAuthFilterHttpTest {
         MockedStatic<StpUtil> stp = mockStatic(StpUtil.class);
         stp.when(StpUtil::isLogin).thenReturn(true);
         stp.when(StpUtil::getLoginIdDefaultNull).thenReturn(user.getId());
-        stp.when(() -> StpUtil.getSessionByLoginId(any(), eq(false))).thenReturn(session);
+        stp.when(StpUtil::getTokenSession).thenReturn(session);
+        stp.when(StpUtil::getTokenValue).thenReturn("probe-token");
         return stp;
     }
 
@@ -161,9 +161,29 @@ class SaTokenAuthFilterHttpTest {
             mockMvc.perform(get("/api/runs")).andExpect(status().isOk());
 
             // 关键行为：过滤器主动 logout，并且**不建立鉴权上下文**
-            stp.verify(() -> StpUtil.logout(1L));
+            stp.verify(() -> StpUtil.logoutByTokenValue("probe-token"));
             assertNull(SecurityContextHolder.getContext().getAuthentication(),
                     "版本不一致时不应建立鉴权上下文（后续请求按未登录处理）");
+        }
+    }
+
+    @Test
+    void tokenSessionStorageFailureCannotAuthenticateAVersionZeroAccount() throws Exception {
+        try (MockedStatic<StpUtil> stp = loginAs(user(false), 0L)) {
+            stp.when(StpUtil::getTokenSession).thenThrow(new IllegalStateException("session store unavailable"));
+            mockMvc.perform(get("/api/runs")).andExpect(status().isOk());
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
+        }
+    }
+
+    @Test
+    void staleTokenStillFailsClosedWhenRedisCannotDeleteIt() throws Exception {
+        AppUser u = user(false);u.setSessionVersion(1L);
+        try (MockedStatic<StpUtil> stp = loginAs(u, 0L)) {
+            stp.when(() -> StpUtil.logoutByTokenValue("probe-token"))
+                    .thenThrow(new IllegalStateException("session store unavailable"));
+            mockMvc.perform(get("/api/runs")).andExpect(status().isOk());
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
         }
     }
 }

@@ -111,6 +111,8 @@ class AuthzMatrixTest {
             Arguments.of("GET", "/api/notes/attachments/a", "anon", 401),
             Arguments.of("GET", "/api/notes/attachments/a/preview", "anon", 401),
             Arguments.of("GET", "/api/notes/attachments/a/preview", "viewer", 200),
+            Arguments.of("POST", "/api/notes/drafts/fork", "anon", 401),
+            Arguments.of("POST", "/api/notes/drafts/fork", "viewer", 200),
             Arguments.of("DELETE", "/api/notes/attachments/a", "anon", 401),
             Arguments.of("POST", "/api/notes/attachments", "viewer", 200),
             Arguments.of("GET", "/api/notes/attachments/a", "viewer", 200),

@@ -3,6 +3,7 @@ package com.gmsr.scheduler.repository;
 import com.gmsr.scheduler.domain.AppUser;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -19,6 +20,15 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     /** 通过绑定的群友找账号（改群友名时要同步账号显示名）。 */
     Optional<AppUser> findByPlayerId(Long playerId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from AppUser u where u.player.id = :playerId")
+    Optional<AppUser> findByPlayerIdForUpdate(@Param("playerId") Long playerId);
+
+    /** Lock the whole administrator set before editing/deleting accounts, in a stable order. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from AppUser u where u.role = :role order by u.id")
+    List<AppUser> findByRoleForUpdate(@Param("role") AppUser.Role role);
 
     /**
      * 取账号并加行锁，用于**把「刷新会话」和「撤销会话」串行化**。
