@@ -12,47 +12,102 @@ if [ -f "$HOME/.ssh/gmsr_deploy" ]; then
 else
   SSH_KEY="$PROJECT_DIR/../.deploy/id_ed25519"
 fi
-KNOWN_HOSTS="$PROJECT_DIR/../.deploy/known_hosts"
-SERVER="root@<YOUR_SERVER_IP>"
-SSH_PORT=2222
+if [[ -z "${KNOWN_HOSTS:-}" ]]; then
+  if [[ -f "$PROJECT_DIR/../.deploy/known_hosts" ]]; then KNOWN_HOSTS="$PROJECT_DIR/../.deploy/known_hosts"
+  else KNOWN_HOSTS="$HOME/.ssh/known_hosts"; fi
+fi
+[[ -f "$KNOWN_HOSTS" ]] || { echo '缺少已核验的 SSH known_hosts 文件；请先核对服务器指纹，并用 KNOWN_HOSTS=/path/to/known_hosts 指定文件。' >&2; exit 1; }
+SERVER="${SERVER:-root@<YOUR_SERVER_IP>}"
+SSH_PORT="${SSH_PORT:-2222}"
 
-SSH="ssh -i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=$KNOWN_HOSTS -o ConnectTimeout=20"
-SCP="scp -i $SSH_KEY -P $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=$KNOWN_HOSTS -r"
+SSH=(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ConnectTimeout=20)
+SCP=(scp -i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS" -r)
 
 deploy_backend() {
   echo "==> 同步后端源码到服务器"
-  $SSH "$SERVER" 'mkdir -p /root/gmsr-build'
-  $SCP "$PROJECT_DIR/backend" "$SERVER:/root/gmsr-build/"
+  "${SSH[@]}" "$SERVER" 'mkdir -p /root/gmsr-build'
+  "${SCP[@]}" "$PROJECT_DIR/backend" "$SERVER:/root/gmsr-build/"
   echo "==> 服务器上编译打包"
-  $SSH "$SERVER" 'cd /root/gmsr-build/backend && mvn -B -q package -DskipTests -Dfile.encoding=UTF-8'
+  "${SSH[@]}" "$SERVER" 'cd /root/gmsr-build/backend && mvn -B -q package -DskipTests -Dfile.encoding=UTF-8'
   echo "==> 替换 jar 并重启服务"
-  $SSH "$SERVER" '
-    set -e
-    cp /root/gmsr-build/backend/target/gmsr-scheduler.jar /opt/gmsr/app/gmsr-scheduler.jar
-    chown gmsr:gmsr /opt/gmsr/app/gmsr-scheduler.jar
-    systemctl restart gmsr-backend
-    for i in $(seq 1 30); do
-      sleep 2
-      if curl -s -m 3 http://127.0.0.1:18080/api/health >/dev/null; then
-        echo "后端已就绪"; curl -s http://127.0.0.1:18080/api/health; echo
-        exit 0
-      fi
-    done
-    echo "后端启动超时，请查看 /opt/gmsr/logs/app.log"; exit 1
-  '
+  "${SSH[@]}" "$SERVER" bash -s <<'BACKEND'
+set -eEuo pipefail
+umask 077
+live=/opt/gmsr/app/gmsr-scheduler.jar
+previous=/opt/gmsr/app/.rollback/gmsr-scheduler-previous.jar
+had_previous=0
+install -d -m 700 /opt/gmsr/app/.rollback
+if [[ -f "$live" ]]; then
+  install -m 600 "$live" "$previous.next"
+  mv -f -- "$previous.next" "$previous"
+  had_previous=1
+fi
+wait_ready() {
+  local health
+  for i in $(seq 1 30); do
+    sleep 2
+    if health=$(curl -fsS -m 3 http://127.0.0.1:18080/api/health) && grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"' <<< "$health"; then return 0; fi
+  done
+  echo '后端健康检查超时，请查看 journalctl -u gmsr-backend' >&2
+  return 1
+}
+rollback() {
+  local failure=$?
+  trap - ERR
+  if [[ "$had_previous" == 1 ]]; then
+    if install -o gmsr -g gmsr -m 644 "$previous" "$live.next" && mv -f -- "$live.next" "$live" && systemctl restart gmsr-backend && wait_ready; then
+      echo '部署失败，已恢复上一版本并确认后端健康' >&2
+    else
+      echo '部署失败且自动回滚未恢复健康，请立即检查服务；旧 JAR 保留在 .rollback 目录' >&2
+    fi
+  else
+    echo '首次部署失败，没有旧版本可回滚' >&2
+  fi
+  exit "$failure"
+}
+trap rollback ERR
+install -o gmsr -g gmsr -m 644 /root/gmsr-build/backend/target/gmsr-scheduler.jar "$live.next"
+mv -f -- "$live.next" "$live"
+systemctl restart gmsr-backend
+wait_ready
+trap - ERR
+echo '后端已就绪'
+BACKEND
 }
 
 deploy_frontend() {
   echo "==> 本地构建前端"
   cd "$PROJECT_DIR/frontend"
   export npm_config_cache="$PROJECT_DIR/../.tools/npm-cache"
-  npm install --no-audit --no-fund
+  npm ci --no-audit --no-fund
   npm run build
   echo "==> 上传静态文件到 /opt/1panel/www/gmsr"
-  $SSH "$SERVER" 'rm -rf /opt/1panel/www/gmsr/* && mkdir -p /opt/1panel/www/gmsr'
-  $SCP "$PROJECT_DIR/frontend/dist/." "$SERVER:/opt/1panel/www/gmsr/"
-  echo "==> 重载 OpenResty"
-  $SSH "$SERVER" 'docker exec 1Panel-openresty-xjMh nginx -t && docker exec 1Panel-openresty-xjMh nginx -s reload'
+  local stage
+  stage=$("${SSH[@]}" "$SERVER" 'umask 077; mkdir -p /opt/1panel/www; mktemp -d /opt/1panel/www/.gmsr-deploy.XXXXXXXX')
+  [[ "$stage" =~ ^/opt/1panel/www/\.gmsr-deploy\.[a-zA-Z0-9]+$ ]] || { echo '无效的远端发布目录' >&2; return 1; }
+  "${SCP[@]}" "$PROJECT_DIR/frontend/dist/." "$SERVER:$stage/"
+  "${SSH[@]}" "$SERVER" bash -s -- "$stage" <<'REMOTE'
+set -euo pipefail
+stage="$1"
+[[ "$stage" =~ ^/opt/1panel/www/\.gmsr-deploy\.[a-zA-Z0-9]+$ ]] || exit 1
+web=/opt/1panel/www/gmsr
+trap 'rm -rf -- "$stage"' EXIT
+test -s "$stage/index.html"
+test -d "$stage/assets"
+docker exec 1Panel-openresty-xjMh nginx -t
+mkdir -p "$web"
+# Install every referenced asset before switching the entry point. Keep older hashed
+# bundles for open tabs and independent certificate helpers absent from this build.
+while IFS= read -r -d '' file; do
+  relative="${file#"$stage/"}"
+  [[ "$relative" == index.html ]] && continue
+  install -D -m 644 "$file" "$web/$relative"
+done < <(find "$stage" -type f -print0)
+next="$web/.index-$(basename "$stage").html"
+install -m 644 "$stage/index.html" "$next"
+mv -f -- "$next" "$web/index.html"
+docker exec 1Panel-openresty-xjMh nginx -s reload
+REMOTE
 }
 
 case "$MODE" in

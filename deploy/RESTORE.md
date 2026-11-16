@@ -10,6 +10,7 @@
 | 数据库 | `gmsr-YYYYmmdd-HHMMSS.dump` | `pg_dump -Fc`（custom 格式），含结构 + 数据 |
 | 配置 | `gmsr-conf-YYYYmmdd-HHMMSS.tar.gz` | `gmsr.env`（含密钥，权限 600）、nginx 站点配置、systemd 单元、运维脚本 |
 | 应用 | `gmsr-scheduler-latest.jar` | 覆盖式保留一份，省一次构建 |
+| 图片与附件 | `gmsr-notes-YYYYmmdd-HHMMSS.tar.gz` | 与同时间戳数据库包成对恢复 |
 
 **只备份数据库是不够的** —— 演练时发现，光有数据、没有 `gmsr.env`（数据库/Redis 密码、JWT secret）和 nginx 配置，服务起不来。
 
@@ -20,7 +21,7 @@
 ```bash
 # 1) 脚本
 mkdir -p /opt/gmsr/bin
-install -m 755 deploy/backup.sh deploy/restore.sh /opt/gmsr/bin/
+install -m 755 deploy/backup.sh deploy/backup-attachments.sh deploy/restore.sh /opt/gmsr/bin/
 
 # 2) 定时任务
 install -m 644 deploy/gmsr-backup.service deploy/gmsr-backup.timer /etc/systemd/system/
@@ -44,7 +45,7 @@ systemctl start gmsr-backup.service         # 立刻跑一次
 journalctl -u gmsr-backup.service -n 20      # 看上次结果
 ```
 
-保留最近 **14 天**，过期自动清理（只删 `gmsr-*.dump` / `gmsr-conf-*.tar.gz`，不会误删别的文件）。
+保留最近 **14 天**，过期自动清理（只删 `gmsr-*.dump` / `gmsr-conf-*.tar.gz` / `gmsr-notes-*.tar.gz`，不会误删别的文件）。
 
 环境变量可覆盖：
 
@@ -92,6 +93,9 @@ BACKUP_DIR=/mnt/nas/backup KEEP_DAYS=30 /opt/gmsr/bin/backup.sh
 | 覆盖生产库 | 先做**整库**自救备份（含所有 schema）→ 再在临时库试恢复并核对 → 成功后才动生产 |
 | 目标库里还有别的 schema | 拒绝，必须再加 `--force-db`（重建数据库会连带删掉它们，本项目备份救不回来） |
 | 目标库不存在 | 直接恢复 |
+| 数据库或 schema 名含 SQL 标点、非法字符或超过 63 字符 | 在调用 Docker 前拒绝；本工具支持小写字母、数字、下划线，且不能以数字开头 |
+
+每次恢复使用独立的私有临时目录和容器输入文件；不同演练库并行恢复不会互相覆盖备份输入。试恢复库名统一为小写，避免随机后缀的大小写被 PostgreSQL 折叠后无法连接。
 
 > 早期版本只保护名字等于 `gmsr` 的库，其他同名业务库会被无提示删除 —— 已修。
 
@@ -156,4 +160,4 @@ systemctl daemon-reload
 
 `backup.sh` 现在额外生成 `gmsr-notes-时间戳.tar.gz`，与同一时间戳的数据库 dump 成对保存。数据库恢复不会自动恢复磁盘上的附件。恢复时停止后端，把现有附件目录先保留为回退副本，再将同批附件包解压到配置的 `GMSR_NOTES_DIRECTORY`（默认 `/opt/gmsr/data/note-attachments`），确保 `gmsr` 用户可读写后启动服务。不要用不同日期的附件包配对数据库；自定义目录为相对路径时，以服务工作目录 `/opt/gmsr` 为基准。
 
-发布便签的附件移除采用 24 小时延迟物理删除，使正在执行的在线数据库备份仍能取得对应文件。清理任务每次最多处理 100 条，文件删除失败时保留记录供下次重试。附件备份工具会拒绝将备份输出写入被备份目录内部。
+攻略/草稿删除后保留 7 天；定时任务清理到期记录及不再被攻略或草稿引用的附件，磁盘删除失败会保留元数据等待重试。重要发布或恢复前可先停止后端生成数据库和附件的一致备份。附件备份工具会拒绝将备份输出写入被备份目录内部。

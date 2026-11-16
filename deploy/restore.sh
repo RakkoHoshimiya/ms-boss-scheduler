@@ -26,6 +26,7 @@
 #       （若该库还承载其它 schema，需要再加 --force-db）
 #
 set -euo pipefail
+umask 077
 
 DUMP="${1:-}"
 TARGET_DB="${2:-}"
@@ -35,7 +36,7 @@ ENV_FILE="${ENV_FILE:-/opt/gmsr/gmsr.env}"
 CONTAINER="${PG_CONTAINER:-1Panel-postgresql-2MLg}"
 PROD_DB="${PROD_DB:-gmsr}"
 DB_SCHEMA="${DB_SCHEMA:-gmsr}"
-ROOT_ENV="/opt/1panel/apps/postgresql/postgresql/.env"
+ROOT_ENV="${RESTORE_ROOT_ENV:-/opt/1panel/apps/postgresql/postgresql/.env}"
 DB_USER="gmsr_app"
 
 FORCE=0
@@ -57,6 +58,18 @@ usage() {
 
 [[ -z "$DUMP" || -z "$TARGET_DB" ]] && usage
 
+# These values enter SQL identifiers and catalog string comparisons below. Restrict the
+# maintenance tool to plain lowercase PostgreSQL names before touching files or Docker.
+validate_identifiers() {
+    local name value
+    for name in TARGET_DB PROD_DB DB_SCHEMA DB_USER; do
+        value="${!name}"
+        [[ "$value" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] \
+            || die "$name 必须是最长 63 字符的小写 PostgreSQL 标识符（字母、数字、下划线，不能以数字开头）"
+    done
+}
+validate_identifiers
+
 # ---------------------------------------------------------------- 依赖与连接
 [[ -f "$ENV_FILE" ]] || die "找不到 $ENV_FILE"
 # shellcheck disable=SC1090
@@ -67,6 +80,7 @@ set -a; . "$ENV_FILE"; set +a
 # shellcheck disable=SC1090
 set -a; . "$ROOT_ENV"; set +a
 : "${PANEL_DB_ROOT_USER:?}" "${PANEL_DB_ROOT_PASSWORD:?}"
+validate_identifiers
 
 docker exec "$CONTAINER" sh -c 'true' 2>/dev/null || die "无法访问容器 $CONTAINER"
 
@@ -88,16 +102,32 @@ echo "[$(date '+%F %T')] ① 验证备份文件"
 SIZE="$(du -h "$DUMP" | cut -f1)"
 SHA="$(sha256sum "$DUMP" | cut -d' ' -f1)"
 
-docker cp "$DUMP" "$CONTAINER:/tmp/restore-src.dump" > /dev/null
-trap 'docker exec "$CONTAINER" rm -f /tmp/restore-src.dump 2>/dev/null || true' EXIT
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gmsr-restore.XXXXXXXX")"
+case "$WORK_DIR" in "${TMPDIR:-/tmp}/gmsr-restore."*) ;; *) die '无效的恢复临时目录';; esac
+RUN_ID="${WORK_DIR##*.}"
+SOURCE_DUMP="/tmp/gmsr-restore-$RUN_ID-src.dump"
+RESCUE_DUMP="/tmp/gmsr-restore-$RUN_ID-rescue.dump"
+TRIAL=""
+TRIAL_CREATED=0
+cleanup() {
+    # A failed verification query must not leave a private-data drill database behind.
+    # Only drop a name this invocation successfully created, never a preexisting DB.
+    if [[ "$TRIAL_CREATED" == 1 ]]; then
+        psql_super "drop database if exists $TRIAL" > /dev/null 2>&1 || true
+    fi
+    docker exec "$CONTAINER" rm -f "$SOURCE_DUMP" "$RESCUE_DUMP" 2>/dev/null || true
+    rm -rf -- "$WORK_DIR"
+}
+trap cleanup EXIT
+docker cp "$DUMP" "$CONTAINER:$SOURCE_DUMP" > /dev/null
 
-docker exec "$CONTAINER" pg_restore --list /tmp/restore-src.dump > /tmp/restore-toc.txt 2>/dev/null \
+docker exec "$CONTAINER" pg_restore --list "$SOURCE_DUMP" > "$WORK_DIR/toc.txt" 2>/dev/null \
     || die "备份文件无法解析（pg_restore --list 失败），已中止，未改动任何数据库"
 for t in boss_run run_member player app_user; do
-    grep -q "TABLE DATA .* $t " /tmp/restore-toc.txt \
+    grep -q "TABLE DATA .* $t " "$WORK_DIR/toc.txt" \
         || die "备份文件里没有表 $t 的数据，看起来不是本项目的备份，已中止"
 done
-rm -f /tmp/restore-toc.txt
+rm -f "$WORK_DIR/toc.txt"
 echo "  大小 $SIZE  sha256 ${SHA:0:16}…  目录校验通过"
 
 # ---------------------------------------------------------------- 2) 目标库检查
@@ -147,25 +177,30 @@ EOF
 fi
 
 # ---------------------------------------------------------------- 3) 覆盖生产库前的额外保护
-if [[ "$TARGET_DB" == "$PROD_DB" ]]; then
+if [[ "$TARGET_DB" == "$PROD_DB" && -n "$EXISTS" ]]; then
     echo "[$(date '+%F %T')] ③ 覆盖生产库：先做**整库**自救备份"
-    SELF="$(dirname "$DUMP")/pre-restore-$(date +%Y%m%d-%H%M%S).dump"
+    SELF="$(dirname "$DUMP")/pre-restore-$(date +%Y%m%d-%H%M%S)-$RUN_ID.dump"
     # 注意：这里**不加 -n**，备份整个数据库（含其它 schema），
     # 否则下面的 drop database 会删掉自救备份救不回来的东西。
     docker exec -e PGPASSWORD="$GMSR_DB_PASSWORD" "$CONTAINER" \
-        pg_dump -U "$DB_USER" -d "$PROD_DB" --no-owner --no-acl -Fc -f /tmp/pre-restore.dump
-    docker exec "$CONTAINER" pg_restore --list /tmp/pre-restore.dump > /dev/null 2>&1 \
+        pg_dump -U "$DB_USER" -d "$PROD_DB" --no-owner --no-acl -Fc -f "$RESCUE_DUMP"
+    docker exec "$CONTAINER" pg_restore --list "$RESCUE_DUMP" > /dev/null 2>&1 \
         || die "自救备份校验失败，已中止（生产库未改动）"
-    docker cp "$CONTAINER:/tmp/pre-restore.dump" "$SELF" > /dev/null
-    docker exec "$CONTAINER" rm -f /tmp/pre-restore.dump
+    docker cp "$CONTAINER:$RESCUE_DUMP" "$SELF" > /dev/null
+    chmod 600 "$SELF"
+    docker exec "$CONTAINER" rm -f "$RESCUE_DUMP"
     echo "  ✓ 整库备份（含所有 schema）已保存到 $SELF"
 
+fi
+if [[ "$TARGET_DB" == "$PROD_DB" ]]; then
     echo "[$(date '+%F %T')] ④ 试恢复到临时库（确认备份真的能用，再动生产）"
-    TRIAL="gmsr_restore_check_$(date +%s)"
+    # Unquoted PostgreSQL identifiers fold to lowercase; use exactly that name when
+    # connecting later, even when mktemp produced a mixed-case random suffix.
+    TRIAL="gmsr_restore_check_${RUN_ID,,}"
     psql_super "create database $TRIAL owner $DB_USER" > /dev/null
+    TRIAL_CREATED=1
     if ! docker exec -e PGPASSWORD="$GMSR_DB_PASSWORD" "$CONTAINER" \
-            pg_restore -U "$DB_USER" -d "$TRIAL" --no-owner --no-acl /tmp/restore-src.dump; then
-        psql_super "drop database if exists $TRIAL" > /dev/null || true
+            pg_restore -U "$DB_USER" -d "$TRIAL" --no-owner --no-acl "$SOURCE_DUMP"; then
         die "试恢复失败，已中止（生产库未改动）"
     fi
     TR_BOSS="$(docker exec -e PGPASSWORD="$GMSR_DB_PASSWORD" "$CONTAINER" \
@@ -173,7 +208,8 @@ if [[ "$TARGET_DB" == "$PROD_DB" ]]; then
     TR_MEM="$(docker exec -e PGPASSWORD="$GMSR_DB_PASSWORD" "$CONTAINER" \
         psql -U "$DB_USER" -d "$TRIAL" -qtAX -c "select count(*) from $DB_SCHEMA.run_member")"
     psql_super "drop database if exists $TRIAL" > /dev/null
-    [[ "${TR_BOSS:-0}" -gt 0 ]] || die "试恢复后 boss_run 为空，已中止（生产库未改动）"
+    TRIAL_CREATED=0
+    [[ "$TR_BOSS" =~ ^[0-9]+$ && "$TR_MEM" =~ ^[0-9]+$ ]] || die "试恢复后无法核对业务表，已中止（生产库未改动）"
     echo "  ✓ 试恢复成功：$TR_BOSS 趟车次 / $TR_MEM 个席位（临时库已删除）"
 else
     echo "[$(date '+%F %T')] ③ 目标不是生产库，跳过自救备份与试恢复"
@@ -186,8 +222,8 @@ psql_super "create database \"$TARGET_DB\" owner $DB_USER" > /dev/null
 
 echo "[$(date '+%F %T')] ⑥ 恢复数据"
 docker exec -e PGPASSWORD="$GMSR_DB_PASSWORD" "$CONTAINER" \
-    pg_restore -U "$DB_USER" -d "$TARGET_DB" --no-owner --no-acl /tmp/restore-src.dump
-docker exec "$CONTAINER" rm -f /tmp/restore-src.dump
+    pg_restore -U "$DB_USER" -d "$TARGET_DB" --no-owner --no-acl "$SOURCE_DUMP"
+docker exec "$CONTAINER" rm -f "$SOURCE_DUMP"
 
 # ---------------------------------------------------------------- 5) 结果核对
 echo "[$(date '+%F %T')] ✓ 恢复完成"

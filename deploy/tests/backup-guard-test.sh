@@ -32,6 +32,12 @@ esac
 exit 0
 STUB
 chmod +x "$WORK/bin/docker"
+# This fixture verifies missing configuration after a successful export, not the Linux
+# backup mutex. Git Bash has no flock; leave Linux CI using the real executable.
+if ! command -v flock > /dev/null; then
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$WORK/bin/flock"
+    chmod +x "$WORK/bin/flock"
+fi
 
 printf 'GMSR_DB_PASSWORD=dummy\n' > "$WORK/env"
 mkdir -p "$WORK/bk"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+mkdir -p "$ROOT/.tools"
 WORK="$(mktemp -d "$ROOT/.tools/note-backup-test.XXXXXX")"
 case "$WORK" in "$ROOT/.tools/note-backup-test."*) ;; *) exit 1;; esac
 trap 'rm -rf -- "$WORK"' EXIT

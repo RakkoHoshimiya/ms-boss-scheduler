@@ -109,12 +109,14 @@ jobs:
           set -euo pipefail
           required=(
             deploy/backup.sh
+            deploy/backup-attachments.sh
             deploy/restore.sh
             deploy/RESTORE.md
             deploy/gmsr-backup.service
             deploy/gmsr-backup.timer
             deploy/gmsr.conf
             deploy/livekit-rtc.inc
+            deploy/security-headers.inc
             deploy/gmsr.env.example
             deploy/tests/restore-guard-test.sh
           )
@@ -135,6 +137,11 @@ jobs:
           # 用一个假的 docker 模拟成功导出，指向不存在的配置目录，
           # 断言 backup.sh 会失败并说明「缺少必需配置文件」
           bash deploy/tests/backup-guard-test.sh
+
+      - name: 附件备份与部署行为回归
+        run: |
+          bash deploy/tests/attachment-backup-test.sh
+          bash deploy/tests/deploy-guard-test.sh
 
   frontend:
     name: 前端（类型检查 + 构建）
@@ -163,7 +170,11 @@ jobs:
 
       - name: 图文草稿恢复与排班同步回归
         working-directory: frontend
-        run: npm run verify:notes && npm run verify:sync
+        run: npm run verify:notes && npm run verify:sync && npm run verify:auth-session && npm run verify:voice-lifecycle
+
+      - name: 本地布局与音频回归
+        working-directory: frontend
+        run: npm run verify:mobile && npm run verify:layout-switch && npm run verify:webrtc && npm run verify:audio && npm run verify:volume-ui && npm run verify:myruns-sort
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
