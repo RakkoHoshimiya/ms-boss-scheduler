@@ -10,14 +10,21 @@ globalThis.matchMedia=()=>({matches:false,addListener(){},removeListener(){},add
 localStorage.setItem('gmsr.token','test');
 
 globalThis.confirm=()=>true;
-let drafts=[];let draftTrash=[];let trash=[];let notes=[];let stored=[];let stages=0;let writes=0;let failUpload=false;
+let drafts=[];let draftTrash=[];let trash=[];let notes=[];let stored=[];let stages=0;let writes=0;let failUpload=false;let delayedDraftSave=null;let rejectSourceDraft=false;let forks=0;
 globalThis.fetch=async(url,opts={})=>{
  let body={};
  if(url==='/api/auth/me')body={id:7,username:'test',displayName:'测试用户',role:'VIEWER'};
  else if(url==='/api/notes/drafts')body=drafts;
  else if(url==='/api/notes/drafts/trash')body=draftTrash;
  else if(url==='/api/notes/trash')body=trash;
+ else if(url==='/api/notes/drafts/fork' && opts.method==='POST'){
+  forks++;const update=JSON.parse(opts.body);const copies=stored.filter(f=>update.attachmentIds.includes(f.id)).map(f=>({...f,id:'copy'+f.id}));
+  let content=update.content;for(const f of copies)content=content.replaceAll('[[image:'+f.id.slice(4)+']]','[[image:'+f.id+']]');
+  stored.push(...copies);body={...update,id:crypto.randomUUID(),version:0,noteId:null,sourceVersion:null,content,attachments:copies,updatedAt:new Date().toISOString()};drafts.push(body);
+ }
  else if(url.startsWith('/api/notes/drafts/') && opts.method==='PUT') {
+  if(rejectSourceDraft)return new Response(JSON.stringify({message:'来源攻略已删除或版本冲突',code:'CONCURRENT_UPDATE'}),{status:409});
+  if(delayedDraftSave)await delayedDraftSave;
   const update=JSON.parse(opts.body);const old=drafts.find(d=>d.id===update.id);if(old)assert.equal(update.version,old.version);
   body={...update,version:old?old.version+1:0,updatedAt:new Date().toISOString(),attachments:stored.filter(f=>update.attachmentIds.includes(f.id))};drafts=[...drafts.filter(d=>d.id!==body.id),body];
  } else if(url.startsWith('/api/notes/drafts/') && opts.method==='DELETE') {
@@ -87,6 +94,26 @@ button('删除草稿').click();await wait();await wait();assert(!drafts.some(d=>
 // Published content is hidden immediately, then recoverable with its attachments.
 document.querySelector('button.note-card').click();await wait();await wait();assert(button('删除'),document.body.textContent);button('删除').click();await wait();await wait();assert.equal(notes.length,0);assert.equal(trash.length,1);
 button('恢复攻略').click();await wait();await wait();assert.equal(notes[0].title,'图文攻略');assert.equal(trash.length,0);
+// The old save reaches the server after a newer edit and the editor has unmounted.
+let finishOldSave;delayedDraftSave=new Promise(resolve=>{finishOldSave=resolve;});
+button('＋ 发布便签').click();await wait();input(document.querySelector('.modal input[type="text"]'),'慢请求恢复测试');
+const slowEditor=document.querySelector('.note-rich-editor');slowEditor.textContent='旧快照A';slowEditor.dispatchEvent(new w.Event('input',{bubbles:true}));
+await new Promise(resolve=>setTimeout(resolve,1100));
+slowEditor.textContent='请求期间继续编辑的B';slowEditor.dispatchEvent(new w.Event('input',{bubbles:true}));await wait();
+await route('#/changelog');finishOldSave();delayedDraftSave=null;await wait();
+assert.equal(drafts.find(d=>d.title==='慢请求恢复测试').content,'旧快照A');
+await route('#/notes');draftCard('慢请求恢复测试').querySelector('button').click();await wait();
+assert.equal(document.querySelector('.note-rich-editor').textContent,'请求期间继续编辑的B','A slow old save must not replace newer unsent editing on restore');
+// Fork the complete current document even when the original draft can no longer be saved.
+const oldDraft=drafts.find(d=>d.title==='慢请求恢复测试');const oldContent=oldDraft.content;const beforeForkWrites=writes;
+await attach('插入正文图片');input(document.querySelector('.modal input[type="text"]'),'另存新攻略测试');await wait();rejectSourceDraft=true;
+button('另存为新攻略').click();await wait();await wait();
+const copied=drafts.find(d=>d.title==='另存新攻略测试');assert.equal(forks,1);assert(copied);assert.notEqual(copied.id,oldDraft.id);
+assert.equal(copied.noteId,null);assert.equal(copied.sourceVersion,null);assert.equal(oldDraft.content,oldContent);
+assert(copied.content.startsWith('请求期间继续编辑的B'));assert(copied.content.includes('[[image:copy'));
+assert(document.querySelector('.note-rich-editor img').dataset.noteImage.startsWith('copy'));assert.equal(writes,beforeForkWrites,'Forking must leave publishing for an explicit confirmation');
 console.log('NOTE_RECOVERY_PASS: autosave, route/refresh recovery with image, private drafts, deletion and restore');
+console.log('NOTE_DELAYED_SAVE_PASS: unsent edits survive a late old save across route unmount and recovery');
+console.log('NOTE_FORK_PASS: unsaved document and image are forked without flushing the broken source or publishing automatically');
 console.log('NOTE_COMPOSE_PASS: one document, visible cursor image, footer attachment, failure preservation, image deletion, publish and cancel');
 dom.window.close();process.exit(0);

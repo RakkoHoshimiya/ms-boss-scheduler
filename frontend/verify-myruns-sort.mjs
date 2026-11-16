@@ -25,15 +25,15 @@ const run = (bossName, runIndex, status) => ({ bossName, runIndex, status });
 console.log('=== 未完成优先 ===');
 check('已完成的排到最后', () => {
   const input = [
-    run('卡琳', 1, 'DONE'),
-    run('斯乌', 1, 'PLANNED'),
-    run('林波', 2, 'DONE'),
-    run('监视者卡尔洛斯', 1, 'PLANNED'),
+    run('Done A', 1, 'DONE'),
+    run('Pending B', 1, 'PLANNED'),
+    run('Done C', 2, 'DONE'),
+    run('Pending A', 1, 'PLANNED'),
   ];
   const out = sortMyRuns(input);
   assert.deepEqual(
     out.map((x) => x.bossName + x.runIndex),
-    ['斯乌1', '监视者卡尔洛斯1', '卡琳1', '林波2'],
+    ['Pending A1', 'Pending B1', 'Done A1', 'Done C2'],
     '未完成应在前面，已完成在后',
   );
 });

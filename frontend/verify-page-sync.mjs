@@ -14,14 +14,16 @@ globalThis.confirm = () => true; localStorage.setItem('gmsr.token', 'test-sessio
 const boss = { id: 1, groupId: 1, groupName: '测试分组', name: '测试BOSS', tier: 'N', tierLabel: '普通', tiers: ['N'], allowedTiers: ['N'], capacity: 6, sortOrder: 0, enabled: true, runCount: 1, assignedCount: 1 };
 const member = { id: 1, characterId: 1, playerId: 7, playerNickname: '测试队友', job: 'Kanna', power: 100, slotNo: 1, role: 'MEMBER', status: 'CONFIRMED', mainChar: true };
 let run = { id: 1, bossId: 1, bossName: boss.name, groupId: 1, groupName: boss.groupName, tier: 'N', tierLabel: '普通', capacity: 6, runIndex: 1, scheduled: '原始时间', status: 'PLANNED', memberCount: 1, powerTotal: 100, members: [member] };
+const otherBoss={...boss,id:2,name:'另一个BOSS'};
+const otherRun={...run,id:2,bossId:2,bossName:otherBoss.name,scheduled:'BOSS-B-only',members:[],memberCount:0};
 let runRequests = 0, delay = false, release;
 globalThis.fetch = async url => {
   let body = [];
   if (url === '/api/auth/me') body = { id: 7, username: 'test', displayName: '测试用户', role: 'VIEWER', canSchedule: true, playerId: 7 };
   else if (url === '/api/runs') {
-    runRequests++; body = [structuredClone(run)];
+    runRequests++; body = [structuredClone(run),otherRun];
     if (delay) { delay = false; await new Promise(resolve => { release = resolve; }); }
-  } else if (url === '/api/bosses') body = [boss];
+  } else if (url === '/api/bosses') body = [boss,otherBoss];
   else if (url === '/api/boss-groups') body = [{ id: 1, name: boss.groupName, sortOrder: 0, bossCount: 1 }];
   else if (url === '/api/players') body = [{ id: 7, nickname: member.playerNickname, active: true, sortOrder: 0, characterCount: 1, characters: [{ ...member, id: 1, sortOrder: 0 }] }];
   else if (url === '/api/players/7/runs') body = [{ ...run, runId: 1, characterId: 1, characterJob: 'Kanna', characterPower: 100 }];
@@ -65,5 +67,19 @@ w.dispatchEvent(new w.Event('focus')); await wait(); assert.equal(runRequests, h
 await route('#/'); Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
 run.scheduled = '我的车次也同步'; document.dispatchEvent(new w.Event('visibilitychange')); await wait(); await wait();
 assert(document.body.textContent.includes('我的车次也同步'));
+// A delayed ordinary BOSS load (outside usePageSync) must never overwrite a new selection.
+await route('#/bosses');delay=true;document.querySelector('.boss-card').click();await wait();const releaseBossA=release;
+button('← 返回 BOSS 列表').click();await wait();
+[...document.querySelectorAll('.boss-card')].find(el=>el.textContent.includes(otherBoss.name)).click();await wait();await wait();
+assert(document.body.textContent.includes('BOSS-B-only'));
+releaseBossA();await wait();assert(document.body.textContent.includes('BOSS-B-only'));
+assert(!document.body.textContent.includes('我的车次也同步'),'The old BOSS response cannot display actionable runs under the new BOSS title');
+// Combo selections use virtual negative IDs; syncing must resolve their shared key.
+boss.comboKey='test-combo';boss.comboName='测试融合车';boss.comboTier='N';
+otherBoss.comboKey='test-combo';otherBoss.comboName='测试融合车';otherBoss.comboTier='N';
+await route('#/changelog');await route('#/bosses');document.querySelector('.boss-card').click();await wait();await wait();
+assert(document.querySelector('h1').textContent.includes('测试融合车'));w.dispatchEvent(new w.Event('focus'));await wait();await wait();
+assert(document.querySelector('h1').textContent.includes('测试融合车'),'Syncing must keep the selected virtual combo detail open');
 console.log('PAGE_SYNC_PASS: focus/visibility sync, event coalescing, hidden pause, unsaved input protection, late-response protection, my-runs refresh');
+console.log('BOSS_SELECTION_PASS: delayed old loads cannot overwrite a newly selected BOSS');
 dom.window.close(); process.exit(0);

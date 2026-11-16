@@ -105,7 +105,7 @@ export default function NotesPage() {
       const group = filtered.filter(note => note.pinned === pinned);
       return group.length > 0 && <section key={String(pinned)}><h2 className="notes-section">{pinned ? '📌 置顶必看' : '全部便签'} <small>{group.length}</small></h2><div className="notes-grid">{group.map(note => <button disabled={busy} className={`note-card ${note.pinned ? 'is-pinned' : ''}`} key={note.id} onClick={() => open(note.id)}><span className="note-tag">{note.pinned ? '置顶 · 重点提醒' : '攻略与提示'}</span><h3>{note.title}</h3><p>{noteSummary(note.content)}</p><footer><time>{new Date(note.updatedAt).toLocaleString('zh-CN')}</time><span>查看详情 ↗</span></footer></button>)}</div></section>;
     })}
-    {editing && <NoteEditor key={draft?.id ?? initial?.note.id ?? 'new'} initial={initial} draft={draft} onSaved={saved} onClose={() => { void closeEditor(); }} />}
+    {editing && <NoteEditor key={draft?.id ?? initial?.note.id ?? 'new'} initial={initial} draft={draft} onSaved={saved} onForked={editDraft} onClose={() => { void closeEditor(); }} />}
     {detail && !editing && <Modal title={detail.note.title} onClose={() => { if (!busy) setDetail(null); }} footer={<>
       <button className="btn" disabled={busy} onClick={pin}>{detail.note.pinned ? '取消置顶' : '置顶'}</button>
       <button className="btn" disabled={busy} onClick={() => { const existing = drafts.find(value => value.noteId === detail.note.id); setDraft(existing); setInitial(detail); setEditing(true); }}>编辑</button>

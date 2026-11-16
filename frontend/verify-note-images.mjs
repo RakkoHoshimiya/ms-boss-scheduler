@@ -84,5 +84,14 @@ w.location.hash='#/notes';await wait();await wait();expireAccess=true;open();awa
 assert.equal(previews,4,'New session must refetch its preview, including one auth refresh retry');
 assert.equal(refreshes,1);previewStream.enqueue(new Uint8Array([5,6,7,8]));previewStream.close();await wait();
 assert(document.querySelector('.note-content img'),'Token rotation must not cancel the image being retried');
+// A successful original should replace an earlier preview failure in the UI.
+button('关闭').click();await wait();button('退出').click();await wait();w.location.hash='#/login';await wait();
+for(const [selector,value] of [['input[type="text"]','next'],['input[type="password"]','test-password']]){
+ const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new w.Event('input',{bubbles:true}));
+}
+document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait();w.location.hash='#/notes';await wait();await wait();
+failPreview=true;open();await wait();await wait();assert(document.querySelector('[role="alert"]'));
+button('查看原图').click();await wait();originalStream.enqueue(new Uint8Array([5,6,7,8]));originalStream.close();await wait();
+assert(document.querySelector('.note-content img'));assert.equal(document.querySelector('[role="alert"]'),null,'A displayed original must not keep an obsolete preview failure');
 console.log('NOTE_IMAGE_UI_PASS: retry, streamed percentage, preview-first, explicit original, visible preview during download, reopen cache, account isolation and auth refresh');
 dom.window.close();process.exit(0);

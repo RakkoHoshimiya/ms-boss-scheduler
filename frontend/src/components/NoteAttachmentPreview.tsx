@@ -41,7 +41,7 @@ export default function NoteAttachmentPreview({ file, compact = false }: { file:
   const url = original.url || preview.url;
   const loadingOriginal = originalId === file.id && !original.url;
   const pending = loadingOriginal ? original : !preview.url ? preview : null;
-  const failure = (loadingOriginal ? original.error : preview.error) || error;
+  const failure = (loadingOriginal ? original.error : original.url ? '' : preview.error) || error;
   async function download() {
     setError(''); setDownloadProgress({ loaded: 0, total: file.size });
     const load = notesApi.image(file.id, false, setDownloadProgress);

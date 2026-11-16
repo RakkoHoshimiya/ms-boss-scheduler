@@ -12,16 +12,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { browserFixtureFetch } from './verify-browser-fixtures.mjs';
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-const BACKEND = process.env.GMSR_BACKEND || 'https://<YOUR_SERVER_IP>:4433';
-const distDir = path.resolve('dist');
+const distDir = fileURLToPath(new URL('./dist/',import.meta.url));
+const apiFetch = browserFixtureFetch();
 
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-console.log('=== 1) 服务端设备识别（iPhone UA）');
-const info = await fetch(BACKEND + '/api/client-info', { headers: { 'User-Agent': IPHONE_UA } }).then((r) => r.json());
+console.log('=== 1) 手机设备信息（默认本地fixture；GMSR_BACKEND可选真实服务）');
+const info = await apiFetch('/api/client-info', { headers: { 'User-Agent': IPHONE_UA } }).then((r) => r.json());
 console.log('  device=' + info.device + ' isMobile=' + info.isMobile + ' touch=' + info.touch);
 if (info.device !== 'mobile') {
   console.error('  ✗ 服务端未识别为手机');
@@ -66,18 +67,11 @@ globalThis.matchMedia = () => ({
 globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 globalThis.btoa = (s) => Buffer.from(s, 'binary').toString('base64');
 
-const nodeFetch = globalThis.fetch;
-globalThis.fetch = async (input, init) => {
-  let url = typeof input === 'string' ? input : input.url;
-  if (url.startsWith('/api')) {
-    url = BACKEND + url;
-  }
-  return nodeFetch(url, init);
-};
+globalThis.fetch = apiFetch;
 window.fetch = globalThis.fetch;
 
 const bundle = fs.readdirSync(path.join(distDir, 'assets')).find((f) => f.startsWith('index-') && f.endsWith('.js'));
-await import(path.join(distDir, 'assets', bundle) + `?t=${Date.now()}`);
+await import(pathToFileURL(path.join(distDir, 'assets', bundle)).href);
 
 const root = window.document.getElementById('root');
 const deadline = Date.now() + 15000;
@@ -120,3 +114,4 @@ for (const [name, pass] of checks) {
 
 console.log('\n' + (ok ? 'MOBILE_VERIFY_PASS' : 'MOBILE_VERIFY_FAIL'));
 process.exitCode = ok ? 0 : 1;
+dom.window.close();

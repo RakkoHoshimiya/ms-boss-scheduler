@@ -8,14 +8,7 @@
  *
  * 用法：node verify-webrtc.mjs
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import { JSDOM } from 'jsdom';
-
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-const distDir = path.resolve('dist');
-const bundle = fs.readdirSync(path.join(distDir, 'assets')).find((f) => f.startsWith('index-') && f.endsWith('.js'));
-const code = fs.readFileSync(path.join(distDir, 'assets', bundle), 'utf8');
 
 /** 场景定义：模拟不同的浏览器环境，检查提示是否命中关键词。 */
 const SCENARIOS = [
@@ -55,7 +48,7 @@ let failed = 0;
 
 for (const sc of SCENARIOS) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    url: 'https://<YOUR_SERVER_IP>:4433/',
+    url: 'https://localhost/',
     userAgent: sc.ua,
   });
   const { window } = dom;
@@ -81,11 +74,7 @@ for (const sc of SCENARIOS) {
   globalThis.RTCRtpTransceiver = window.RTCRtpTransceiver;
 
   // 从一个极小的内联实现里取检测函数（与源码逻辑一致即可验证行为）
-  const mod = await import('./src/utils/webrtc-check.ts').catch(() => null);
-  if (!mod) {
-    console.log('（无法直接加载 .ts，请用构建后的产物验证）');
-    break;
-  }
+  const mod = await import('./src/utils/webrtc-check.ts');
   const result = mod.checkWebRtc(sc.ua);
   const hit = sc.expect.length === 0 ? result.ok : sc.expect.every((k) => result.message.includes(k));
   console.log(`  ${hit ? '✓' : '✗'} ${sc.name}`);
@@ -96,6 +85,7 @@ for (const sc of SCENARIOS) {
     console.log(`      ok=${result.ok}`);
   }
   if (!hit) failed++;
+  dom.window.close();
 }
 
 console.log(failed === 0 ? '\nWEBRTC_CHECK_PASS' : `\nWEBRTC_CHECK_FAIL (${failed})`);

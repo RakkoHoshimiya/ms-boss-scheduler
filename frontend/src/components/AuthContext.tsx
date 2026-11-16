@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, clearTokens, getToken, setTokens, setUnauthorizedHandler } from '../api/client';
+import { api, clearTokens, getToken, getAuthSessionVersion, setTokens, setUnauthorizedHandler } from '../api/client';
 import type { UserView } from '../api/types';
 
 interface AuthState {
@@ -40,14 +40,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // SA-Token 的 access token 是不透明随机串（不是 JWT），本地解析不出用户信息，
     // 所以启动时直接问服务端「我是谁」。若 access token 已过期，api 层会自动用
     // refresh token 静默刷新后重试 —— 用户 7 天内用过系统就不会被要求重新登录。
+    const session = getAuthSessionVersion();
     api
       .me()
-      .then(setUser)
+      .then(value => { if (getAuthSessionVersion() === session) setUser(value); })
       .catch(() => {
+        if (getAuthSessionVersion() !== session) return;
         clearTokens();
         setUser(null);
       })
-      .finally(() => setReady(true));
+      .finally(() => { if (getAuthSessionVersion() === session || !getToken()) setReady(true); });
+  }, []);
+
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== 'gmsr.token') return;
+      const session = getAuthSessionVersion();
+      setUser(null);
+      if (!getToken()) { setReady(true); return; }
+      setReady(false);
+      void api.me().then(value => {
+        if (getAuthSessionVersion() === session) setUser(value);
+      }).catch(() => {
+        if (getAuthSessionVersion() === session) clearTokens();
+      }).finally(() => {
+        if (getAuthSessionVersion() === session || !getToken()) setReady(true);
+      });
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {

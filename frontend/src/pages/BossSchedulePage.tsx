@@ -51,6 +51,8 @@ export default function BossSchedulePage() {
   const [runs, setRuns] = useState<RunView[]>([]);
   /** 当前 runs 是按哪一组 BOSS 加载的（切换 BOSS 时用它判断数据是否已经换过来） */
   const [runsLoadedFor, setRunsLoadedFor] = useState('');
+  const activeViewKey = useRef('');
+  const runRequest = useRef(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   /**
@@ -114,17 +116,20 @@ export default function BossSchedulePage() {
    * 数据量很小（几十到几百条），比原来按周分别请求更简单也更快。
    */
   const loadRuns = (bossIds: number[]) => {
-    if (bossIds.length === 0) {
+    const key = bossIds.join(',');
+    if (bossIds.length === 0 || key !== activeViewKey.current) {
       return;
     }
+    const request = ++runRequest.current;
     api
       .runs()
       .then((all) => {
+        if (request !== runRequest.current || key !== activeViewKey.current) return;
         // 融合车：把全部成员 BOSS 的车次都取回来，前端再按车次序号聚合成一张卡
         setRuns(all.filter((run) => bossIds.includes(run.bossId)));
         setRunsLoadedFor(bossIds.join(','));
       })
-      .catch((error) => notify(error instanceof Error ? error.message : '加载车次失败', 'error'));
+      .catch((error) => { if (request === runRequest.current && key === activeViewKey.current) notify(error instanceof Error ? error.message : '加载车次失败', 'error'); });
   };
 
   /** 当前视图涉及的 BOSS id：融合车是全部成员。 */
@@ -132,16 +137,21 @@ export default function BossSchedulePage() {
     () => (currentCombo.length > 0 ? currentCombo.map((b) => b.id) : currentBoss ? [currentBoss.id] : []),
     [currentCombo, currentBoss],
   );
+  const viewKey = viewBossIds.join(',');
+  if (activeViewKey.current !== viewKey) { activeViewKey.current = viewKey; runRequest.current++; }
 
   const syncNotice = usePageSync(async () => {
+    const request = ++runRequest.current, key = viewKey;
     const [bossList, groupList, playerList, allRuns] = await Promise.all([api.bosses(), api.groups(), api.players(), api.runs()]);
     const ids = viewBossIds;
     return () => {
+      if (request !== runRequest.current || key !== activeViewKey.current) return;
       setBosses(bossList); setGroups(groupList); setPlayers(playerList);
       if (currentBoss) {
-        const updated = bossList.find(b => b.id === currentBoss.id);
-        setCurrentBoss(updated ?? null);
-        setCurrentCombo(updated?.comboKey ? bossList.filter(b => b.comboKey === updated.comboKey) : []);
+        const updated = groupBossesForDisplay(bossList).find(entry => currentBoss.comboKey
+          ? entry.comboKey === currentBoss.comboKey : entry.boss.id === currentBoss.id);
+        setCurrentBoss(updated?.boss ?? null);
+        setCurrentCombo(updated?.members ?? []);
       }
       setRuns(allRuns.filter(run => ids.includes(run.bossId))); setRunsLoadedFor(ids.join(','));
     };
@@ -200,8 +210,8 @@ export default function BossSchedulePage() {
 
   /** 当前难度下的车次 */
   const visibleRuns = useMemo(
-    () => (selectedTier ? runs.filter((run) => run.tier === selectedTier) : runs),
-    [runs, selectedTier]
+    () => runs.filter(run => viewBossIds.includes(run.bossId) && (!selectedTier || run.tier === selectedTier)),
+    [runs, selectedTier, viewKey]
   );
 
   /**
@@ -274,11 +284,15 @@ export default function BossSchedulePage() {
 
   /** 重新加载当前视图的车次（融合车会一次拿回全部成员 BOSS）。 */
   const reloadRuns = async () => {
-    if (viewBossIds.length === 0) {
+    const key = viewBossIds.join(',');
+    if (viewBossIds.length === 0 || key !== activeViewKey.current) {
       return;
     }
+    const request = ++runRequest.current;
     const all = await api.runs();
+    if (request !== runRequest.current || key !== activeViewKey.current) return;
     setRuns(all.filter((run) => viewBossIds.includes(run.bossId)));
+    setRunsLoadedFor(key);
   };
 
   /** 车次上已有的角色 id，用于从待选池里排除 */
@@ -351,6 +365,7 @@ export default function BossSchedulePage() {
 
   /** 打开一个 BOSS：融合车条目要把成员 BOSS 一起记下来。 */
   const openBoss = (entry: BossView) => {
+    runRequest.current++; setRuns([]); setRunsLoadedFor(''); tierPickedFor.current = null;
     if (entry.id < 0 || entry.comboKey) {
       const members = comboBossesOf(entry.comboKey);
       setCurrentCombo(members);

@@ -18,18 +18,35 @@ import type {
 const TOKEN_KEY = 'gmsr.token';
 const REFRESH_KEY = 'gmsr.refresh';
 const noteBlobs = createNoteBlobCache();
+let observedToken = localStorage.getItem(TOKEN_KEY);
+let authSessionVersion = 0;
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
+  // Another tab can log out or switch accounts without calling this module's setters.
+  if (token !== observedToken) {
+    observedToken = token; authSessionVersion++; noteBlobs.clear();
+  }
+  return token;
 }
 
 export function setToken(token: string | null, preserveImages = false) {
-  if (!preserveImages && token !== getToken()) noteBlobs.clear();
+  if (!preserveImages) { authSessionVersion++; noteBlobs.clear(); }
+  observedToken = token;
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
     localStorage.removeItem(TOKEN_KEY);
   }
+}
+
+export function getAuthSessionVersion(): number {
+  getToken();
+  return authSessionVersion;
+}
+
+function requireCurrentSession(version: number) {
+  if (getAuthSessionVersion() !== version) throw new ApiError('登录状态已变更，请重新操作', 'SESSION_CHANGED');
 }
 
 export function getRefreshToken(): string | null {
@@ -61,46 +78,45 @@ export function clearTokens() {
  * 多个请求同时收到 401 时，只发起一次刷新，其余等同一个 Promise，
  * 避免并发刷新导致 refresh token 被轮换多次、后面的请求全部失败。
  */
-let refreshing: Promise<boolean> | null = null;
+let refreshing: { version: number; promise: Promise<boolean> } | null = null;
 
-async function refreshAccessToken(): Promise<boolean> {
-  if (refreshing) {
-    return refreshing;
-  }
-  refreshing = (async () => {
-    const refreshToken = getRefreshToken();
-    if (!refreshToken) {
-      return false;
-    }
+async function refreshAccessToken(version: number): Promise<boolean> {
+  requireCurrentSession(version);
+  if (refreshing?.version === version) return refreshing.promise;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  const task = (async () => {
     try {
       const res = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
+      requireCurrentSession(version);
       if (!res.ok) {
         // 7 天没使用 → refresh token 也过期了，必须重新登录
-        clearTokens();
         return false;
       }
       const data = (await res.json()) as { token?: string; refreshToken?: string };
+      requireCurrentSession(version);
       if (!data.token) {
-        clearTokens();
         return false;
       }
       setToken(data.token, true); // Same account/session: keep its current image transfers alive.
       setRefreshToken(data.refreshToken ?? null);
       return true;
     } catch {
+      requireCurrentSession(version);
       return false;
     } finally {
       // 留一点缓冲，避免同一批请求的 401 各自触发刷新
       setTimeout(() => {
-        refreshing = null;
+        if (refreshing?.promise === task) refreshing = null;
       }, 0);
     }
   })();
-  return refreshing;
+  refreshing = { version, promise: task };
+  return task;
 }
 
 /**
@@ -130,31 +146,39 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     headers.set('Content-Type', 'application/json');
   }
   const token = getToken();
+  // Keep the token and the generation from the same storage observation. A second
+  // getter here could observe another tab's B token but retain the earlier A header.
+  const version = authSessionVersion;
+  requireCurrentSession(version);
   if (token) {
     // SA-Token 约定的请求头（原来是 Authorization: Bearer）
     headers.set('gmsr-token', token);
   }
   const response = await fetch(`/api${path}`, { ...options, headers });
+  requireCurrentSession(version);
 
-  if (response.status === 401 && !retried && !path.startsWith('/auth/refresh')) {
+  const authAction = /^\/auth\/(login|logout|refresh)$/.test(path);
+  if (response.status === 401 && !authAction) {
     // access token 过期（2 小时）→ 用 refresh token 静默换一个新的，然后自动重试原请求。
     // 用户完全无感知；只有 refresh token 也过期（连续 7 天没用过系统）才会真正掉线。
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      return request<T>(path, options, true, blob, progress);
+    if (!retried) {
+      // A concurrent request may already have refreshed this same session's access token.
+      const refreshed = Boolean(getToken() && getToken() !== token) || await refreshAccessToken(version);
+      requireCurrentSession(version);
+      if (refreshed) return request<T>(path, options, true, blob, progress);
     }
     clearTokens();
     onUnauthorized?.();
-  } else if (response.status === 401) {
-    clearTokens();
-    onUnauthorized?.();
+    throw new ApiError('请先登录', 'UNAUTHORIZED');
   }
 
   if (response.status === 204) {
     return undefined as T;
   }
   if (blob && response.ok) {
-    if (!progress || !response.body) return await response.blob() as T;
+    if (!progress || !response.body) {
+      const result = await response.blob(); requireCurrentSession(version); return result as T;
+    }
     const total = Number(response.headers.get('Content-Length')) || 0;
     let loaded = 0;
     const chunks: Uint8Array[] = [];
@@ -166,11 +190,13 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
         if (chunk.done) break;
         chunks.push(chunk.value); loaded += chunk.value.byteLength; progress({ loaded, total });
       }
+      requireCurrentSession(version);
       progress({ loaded, total: loaded });
       return new Blob(chunks, { type: response.headers.get('Content-Type') ?? '' }) as T;
     } finally { reader.releaseLock(); }
   }
   const text = await response.text();
+  requireCurrentSession(version);
   const payload = text ? safeParse(text) : null;
   if (!response.ok) {
     const message = (payload && (payload.message as string)) || `请求失败（${response.status}）`;
@@ -372,6 +398,9 @@ export interface NoteDetail { note: GuideNote; attachments: NoteAttachment[] }
 export interface NoteDraft { id: string; version?: number; noteId: number | null; sourceVersion: number | null; title: string; content: string; pinned: boolean; updatedAt: string; deletedAt?: string | null; attachments: NoteAttachment[] }
 export type DraftWrite = Omit<NoteDraft, 'attachments' | 'updatedAt' | 'deletedAt'> & { attachmentIds: string[] };
 function noteImage(aid: string, preview: boolean, progress?: (value: DownloadProgress) => void) {
+ getToken(); // Detect a cross-tab account change before returning an in-memory cache hit.
+ const version = authSessionVersion;
+ requireCurrentSession(version);
  const key = `${aid}/${preview ? 'preview' : 'original'}`;
  const load = noteBlobs.get(key, async (sessionSignal, notify) => {
   const controller = new AbortController();
@@ -386,7 +415,7 @@ function noteImage(aid: string, preview: boolean, progress?: (value: DownloadPro
   } finally { clearTimeout(timeout); sessionSignal.removeEventListener('abort', abort); }
  }, progress);
  // All callers settle; detach progress observers even when a component has disappeared.
- return { promise: load.promise.finally(load.unsubscribe), unsubscribe: load.unsubscribe };
+ return { promise: load.promise.then(blob => { requireCurrentSession(version); return blob; }).finally(load.unsubscribe), unsubscribe: load.unsubscribe };
 }
 export const notesApi = {
  list: () => request<GuideNote[]>('/notes'),
@@ -397,6 +426,7 @@ export const notesApi = {
  drafts: () => request<NoteDraft[]>('/notes/drafts'),
  draftTrash: () => request<NoteDraft[]>('/notes/drafts/trash'),
  saveDraft: (draft: DraftWrite) => request<NoteDraft>(`/notes/drafts/${draft.id}`, {method:'PUT',body:JSON.stringify(draft)}),
+ forkDraft: (draft: DraftWrite) => request<NoteDraft>('/notes/drafts/fork', {method:'POST',body:JSON.stringify(draft)}),
  deleteDraft: (id: string) => request<void>(`/notes/drafts/${id}`, {method:'DELETE'}),
  restoreDraft: (id: string) => request<NoteDraft>(`/notes/drafts/${id}/restore`, {method:'POST'}),
  pin: (note: GuideNote) => request<GuideNote>(`/notes/${note.id}/pin`, {method:'PUT', body:JSON.stringify({pinned:!note.pinned, version:note.version})}),

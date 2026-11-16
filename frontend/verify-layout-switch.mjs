@@ -1,13 +1,12 @@
 /** 验证：手机点了「电脑版」之后，还能不能切回手机版 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { JSDOM } from '/data/dsh/home/京东云1pannel/gmsr/frontend/node_modules/jsdom/lib/api.js';
+import { JSDOM } from 'jsdom';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { browserFixtureFetch } from './verify-browser-fixtures.mjs';
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-const FRONTEND = '/data/dsh/home/京东云1pannel/gmsr/frontend';
-const distDir = path.join(FRONTEND, 'dist');
-const BACKEND = 'https://<YOUR_SERVER_IP>:4433';
-const nodeFetch = globalThis.fetch;
+const distDir = fileURLToPath(new URL('./dist/',import.meta.url));
+const apiFetch = browserFixtureFetch();
 
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const dom = new JSDOM(fs.readFileSync(path.join(distDir, 'index.html'), 'utf8'), {
@@ -27,14 +26,14 @@ globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 globalThis.matchMedia = () => ({ matches:false, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){} });
 globalThis.atob = (s) => Buffer.from(s,'base64').toString('binary');
 globalThis.btoa = (s) => Buffer.from(s,'binary').toString('base64');
-globalThis.fetch = async (i, init) => { let u = typeof i === 'string' ? i : i.url; if (u.startsWith('/api')) u = BACKEND + u; return nodeFetch(u, init); };
+globalThis.fetch = apiFetch;
 window.fetch = globalThis.fetch;
 
 // 关键：预置「用户已经选了电脑版」
 window.localStorage.setItem('gmsr.layout', 'desktop');
 
 const bundle = fs.readdirSync(path.join(distDir, 'assets')).find((f) => f.startsWith('index-') && f.endsWith('.js'));
-await import(path.join(distDir, 'assets', bundle) + '?t=' + Date.now());
+await import(pathToFileURL(path.join(distDir, 'assets', bundle)).href);
 
 const root = document.getElementById('root');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -15,6 +15,15 @@ assert.equal(recovered.find(d => d.id !== cloud.id).version, undefined);
 assert(recovered.find(d => d.id !== cloud.id).title.includes('恢复副本'));
 assert.equal(mergeDrafts([], [local], [{ ...cloud, deletedAt: '2026-11-15T01:03:00Z' }], 7).length, 0);
 assert.equal(mergeDrafts([], [cloud], []).length, 0, 'Purged or published cloud drafts must not resurrect');
+// The old request can reach the server after the next edit was made in the browser.
+const unsynced = { ...cloud, content: 'typed B while A was in flight', pendingLocalChanges: true, updatedAt: '2026-11-15T01:00:30Z' };
+const lateSave = { ...cloud, content: 'old A snapshot', updatedAt: '2026-11-15T01:03:00Z' };
+assert.equal(mergeDrafts([lateSave], [unsynced], [])[0].content, unsynced.content, 'A late save timestamp must not discard newer local editing');
+const concurrent = mergeDrafts([{ ...lateSave, version: 3 }], [unsynced], []);
+assert.equal(concurrent.length, 2);assert(concurrent.some(d=>d.content===unsynced.content && d.id!==unsynced.id),'Concurrent cloud edits retain a recovery copy despite clock skew');
+const published = mergeDrafts([], [unsynced], []);
+assert.equal(published.length, 1);assert.notEqual(published[0].id, unsynced.id,'Unsent local edits survive another window publishing the cloud draft');
+assert.equal(mergeDrafts([], [unsynced], [{...lateSave,deletedAt:'2026-11-15T01:04:00Z'}]).length,0,'Explicit deletion still wins over a stale local copy');
 forgetDraft(7, draft.id); assert.equal(cachedDrafts(8).length, 0);
 globalThis.localStorage.setItem = () => { throw new Error('Storage unavailable'); };
 assert.equal(cacheDraft(7, draft), false);

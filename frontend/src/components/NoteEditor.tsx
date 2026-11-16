@@ -5,9 +5,9 @@ import NoteRichText, { type NoteRichTextHandle } from './NoteRichText';
 import NoteAttachmentPreview from './NoteAttachmentPreview';
 import Modal from './Modal';
 import { useAuth } from './AuthContext';
-import { cacheDraft, forgetDraft } from '../features/note-drafts';
+import { cacheDraft, forgetDraft, draftSignature, type RecoveryDraft } from '../features/note-drafts';
 
-export default function NoteEditor({ initial, draft, onSaved, onClose }: { initial?: NoteDetail; draft?: NoteDraft; onSaved: (note: GuideNote) => void; onClose: () => void }) {
+export default function NoteEditor({ initial, draft, onSaved, onForked, onClose }: { initial?: NoteDetail; draft?: RecoveryDraft; onSaved: (note: GuideNote) => void; onForked: (draft: NoteDraft) => void; onClose: () => void }) {
   const { user } = useAuth();
   const seed = draft ?? initial?.note;
   const seedFiles = draft?.attachments ?? initial?.attachments ?? [];
@@ -33,8 +33,8 @@ export default function NoteEditor({ initial, draft, onSaved, onClose }: { initi
   const stopped = useRef(false);
   const mounted = useRef(true);
   const conflict = useRef(false);
-  const lastSaved = useRef('');
-  const lastCloud = useRef<NoteDraft | null>(null);
+  const lastSaved = useRef(draft?.version !== undefined && !draft.pendingLocalChanges ? draftSignature(draft) : '');
+  const lastCloud = useRef<NoteDraft | null>(draft?.version !== undefined ? draft : null);
   const signature = JSON.stringify({ title, content, pinned, attachmentIds: usedFiles.map(f => f.id) });
   const snapshot = useMemo<NoteDraft>(() => ({ id: draftId.current, noteId: draft?.noteId ?? initial?.note.id ?? null,
     sourceVersion: draft?.sourceVersion ?? initial?.note.version ?? null, title, content, pinned,
@@ -46,15 +46,19 @@ export default function NoteEditor({ initial, draft, onSaved, onClose }: { initi
   const shouldSave = useRef(hasDraft); shouldSave.current = hasDraft;
   function backup() {
     if (!user || stopped.current || !shouldSave.current) return true;
-    return cacheDraft(user.id, { ...latest.current, version: cloudVersion.current });
+    return cacheDraft(user.id, { ...latest.current, version: cloudVersion.current,
+      pendingLocalChanges: draftSignature(latest.current) !== lastSaved.current });
   }
   async function flushDraft(): Promise<NoteDraft | null> {
     while (inFlight.current) await inFlight.current;
     if (stopped.current || !shouldSave.current) return null;
     if (conflict.current) throw new Error('草稿已在其他窗口更新，当前内容仍保留在本机，请关闭后重新打开草稿核对');
     const current = latest.current;
-    const stamp = JSON.stringify({ ...current, version: undefined });
-    if (stamp === lastSaved.current) return lastCloud.current;
+    const stamp = draftSignature(current);
+    if (stamp === lastSaved.current) {
+      if (mounted.current) setDraftStatus('草稿已保存 · 仅自己可见');
+      return lastCloud.current;
+    }
     const task = notesApi.saveDraft({ ...current, version: cloudVersion.current, attachmentIds: current.attachments.map(f => f.id) });
     inFlight.current = task;
     try {
@@ -74,7 +78,7 @@ export default function NoteEditor({ initial, draft, onSaved, onClose }: { initi
     const unload = (event: BeforeUnloadEvent) => {
       if (!stopped.current && shouldSave.current) {
         backup();
-        if (inFlight.current || JSON.stringify({ ...latest.current, version: undefined }) !== lastSaved.current) { event.preventDefault(); event.returnValue = ''; }
+        if (inFlight.current || draftSignature(latest.current) !== lastSaved.current) { event.preventDefault(); event.returnValue = ''; }
       }
     };
     window.addEventListener('beforeunload', unload);
@@ -158,8 +162,27 @@ export default function NoteEditor({ initial, draft, onSaved, onClose }: { initi
       staged.current.clear(); onSaved(note);
     } catch (e) { setError((e as Error).message); setBusy(false); }
   }
+  async function forkDraft() {
+    if (busy) return;
+    const documentContent = editor.current?.read() ?? content;
+    const inDocument = new Set(parseNoteContent(documentContent).flatMap(block => block.kind === 'image' ? [block.attachmentId] : []));
+    const selected = files.filter(file => footerIds.has(file.id) || inDocument.has(file.id));
+    setBusy(true); setError(''); stopped.current = true;
+    try {
+      // The old source may be deleted or conflicting: never flush or overwrite it first.
+      const copied = await notesApi.forkDraft({ id: draftId.current, version: cloudVersion.current,
+        noteId: snapshot.noteId, sourceVersion: snapshot.sourceVersion, title, content: documentContent, pinned,
+        attachmentIds: selected.map(file => file.id) });
+      if (user) {
+        forgetDraft(user.id, draftId.current);
+        cacheDraft(user.id, { ...copied, pendingLocalChanges: false });
+      }
+      staged.current.clear(); onForked(copied);
+    } catch (e) { stopped.current = false; backup(); setError((e as Error).message); setBusy(false); }
+  }
   return <Modal title={snapshot.noteId ? '编辑便签' : '发布便签'} onClose={() => { void cancel(); }} footer={<>
     <button type="button" className="btn danger" disabled={busy} onClick={removeDraft}>删除草稿</button>
+    {hasDraft && <button type="button" className="btn" disabled={busy || !title.trim() || !content.trim() || content.length > 50000} title="创建独立草稿，确认后再发布" onClick={forkDraft}>另存为新攻略</button>}
     <button type="button" className="btn" disabled={busy} onClick={cancel}>保存草稿并关闭</button>
     <button type="button" className="btn primary" disabled={busy || !title.trim() || !content.trim() || content.length > 50000} onClick={save}>{busy ? '正在处理…' : snapshot.noteId ? '保存修改' : '发布便签'}</button>
   </>}>

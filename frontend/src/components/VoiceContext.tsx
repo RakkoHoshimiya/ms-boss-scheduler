@@ -17,6 +17,8 @@ import { useAuth } from './AuthContext';
 import { checkWebRtc } from '../utils/webrtc-check';
 import {
   MAX_MIC_VOLUME,
+  MAX_REMOTE_VOLUME,
+  clampVolume,
   createMicGainProcessor,
   type MicGainProcessor,
 } from '../utils/audio-gain';
@@ -62,12 +64,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   /** 避免并发进入同一个频道 */
   const joiningRef = useRef(false);
+  const micToggleEpoch = useRef<number | null>(null);
+  const joinEpoch = useRef(0);
+  const pendingRoomRef = useRef<Room | null>(null);
+  const userRef = useRef(user); userRef.current = user;
 
   /** 把「静音」状态应用到所有远端音轨（音量归零，但不断开，说话指示灯仍会亮） */
   const applyDeafen = useCallback((deafened: boolean) => {
-    remoteTracks.current.forEach((track) => {
+    remoteTracks.current.forEach((track, sid) => {
       try {
-        track.setVolume(deafened ? 0 : 1);
+        track.setVolume(deafened ? 0 : memberVolumesRef.current.get(sid) ?? 1);
       } catch {
         // 个别浏览器可能不支持，忽略
       }
@@ -135,7 +141,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
    * GainNode 支持 >1 放大，调到 0 即完全静音。
    */
   const setMemberVolume = useCallback((trackSid: string, volume: number) => {
-    memberVolumesRef.current.set(trackSid, volume);
+    const next = clampVolume(volume, MAX_REMOTE_VOLUME);
+    memberVolumesRef.current.set(trackSid, next);
     // 改增益前先确保 AudioContext 是活的，否则改了也没有声音效果
     void resumeAudioContext().then((running) => {
       if (!running) {
@@ -145,7 +152,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     const track = remoteTracks.current.get(trackSid);
     if (track) {
       try {
-        track.setVolume(volume);
+        track.setVolume(deafenedRef.current ? 0 : next);
       } catch (e) {
         console.warn('[语音音量] setVolume 失败', e);
       }
@@ -156,7 +163,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         ? {
             ...prev,
             participants: prev.participants.map((x) =>
-              x.trackSid === trackSid ? { ...x, volume } : x,
+              x.trackSid === trackSid ? { ...x, volume: next } : x,
             ),
           }
         : prev,
@@ -176,13 +183,16 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const leave = useCallback(async (silent = false) => {
     const room = roomRef.current;
+    const pending = pendingRoomRef.current;
+    joinEpoch.current++; joiningRef.current = false;
     roomRef.current = null;
+    pendingRoomRef.current = null;
     deafenedRef.current = false;
     micProcessorRef.current = null;
     setState(null);
     detachAll();
-    if (room) {
-      await room.disconnect().catch(() => undefined);
+    await Promise.all([...new Set([room, pending])].filter((item): item is Room => item !== null).map(item => item.disconnect().catch(() => undefined)));
+    if (room || pending) {
       if (!silent) {
         notify('已离开语音频道');
       }
@@ -191,19 +201,17 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   // 退出登录时断开语音（避免用着别人的身份留在频道里）
   useEffect(() => {
-    if (!user) {
-      void leave(true);
-    }
-  }, [user, leave]);
+    void leave(true);
+  }, [user?.id, leave]);
 
   // 页面关闭时断开
   useEffect(() => {
     const onUnload = () => {
-      void roomRef.current?.disconnect().catch(() => undefined);
+      void leave(true);
     };
     window.addEventListener('beforeunload', onUnload);
-    return () => window.removeEventListener('beforeunload', onUnload);
-  }, []);
+    return () => { window.removeEventListener('beforeunload', onUnload); void leave(true); };
+  }, [leave]);
 
   const join = useCallback(async (room: VoiceRoom) => {
     if (!user) {
@@ -229,6 +237,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return;
     }
     joiningRef.current = true;
+    const operation = ++joinEpoch.current;
+    const isCurrent = () => operation === joinEpoch.current && userRef.current?.id === user.id;
+    let connectingRoom: Room | null = null;
+    let createdTrack: LocalAudioTrack | null = null;
+    let trackPublished = false;
     setState({
       roomId: room.id,
       roomName: room.name,
@@ -243,20 +256,14 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     try {
       // 换频道：先断开旧的
       if (roomRef.current) {
-        await leave(true);
-        setState({
-          roomId: room.id,
-          roomName: room.name,
-          micMuted: true,
-          deafened: false,
-          micError: null,
-          audioBlocked: false,
-          participants: [],
-          micVolume: micVolumeRef.current,
-          connecting: true,
-        });
+        const previous = roomRef.current;
+        roomRef.current = null; micProcessorRef.current = null; deafenedRef.current = false;
+        detachAll();
+        await previous.disconnect().catch(() => undefined);
+        if (!isCurrent()) return;
       }
       const credential = await api.voiceToken(room.id);
+      if (!isCurrent()) return;
       const lkRoom = new Room({
         adaptiveStream: false,
         dynacast: false,
@@ -277,12 +284,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           autoGainControl: true,
         },
       });
+      connectingRoom = lkRoom; pendingRoomRef.current = lkRoom;
 
       const refreshAudioState = () => {
+        if (!isCurrent()) return;
         setState((prev) => (prev ? { ...prev, audioBlocked: !lkRoom.canPlaybackAudio } : prev));
       };
 
       const syncParticipants = () => {
+        if (!isCurrent()) return;
         setState((prev) =>
           prev
             ? {
@@ -314,6 +324,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
        * 浏览器还可能因「没有用户手势」拦截自动播放，这时提示用户点一下。
        */
       const attachTrack = (track: RemoteTrack) => {
+        if (!isCurrent()) return;
         if (track.kind !== Track.Kind.Audio) {
           return;
         }
@@ -347,6 +358,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       };
 
       const detachTrack = (track: RemoteTrack) => {
+        if (!isCurrent()) return;
         const key = track.sid ?? '';
         const element = audioElements.current.get(key);
         if (element) {
@@ -391,6 +403,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           syncParticipants();
         })
         .on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          if (!isCurrent()) return;
           const speaking = new Set(speakers.map((s) => s.identity));
           setState((prev) =>
             prev
@@ -405,8 +418,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           );
         })
         .on(RoomEvent.Disconnected, () => {
+          if (!isCurrent()) return;
+          joinEpoch.current++; joiningRef.current = false;
           detachAll();
           roomRef.current = null;
+          pendingRoomRef.current = null;
           deafenedRef.current = false;
           setState(null);
           notify('与语音服务器的连接已断开，请重新进入');
@@ -415,6 +431,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // LiveKit JS 客户端会在 wsUrl 后自动追加 /rtc（即 wss://host:4433/lk/rtc），
       // nginx 侧把 /lk 前缀剥掉后转发给 LiveKit，所以这里正常 connect 即可。
       await lkRoom.connect(credential.wsUrl, credential.token);
+      if (!isCurrent()) return;
+      pendingRoomRef.current = null;
       roomRef.current = lkRoom;
       // 进房先广播自己的初始状态（默认闭麦、未静音），
       // 这样队友一进来就能看到正确标识，不用等我切换一次
@@ -432,20 +450,31 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         let track: Awaited<ReturnType<typeof createLocalAudioTrack>> | null = null;
         try {
           const micProcessor = createMicGainProcessor();
-          micProcessorRef.current = micProcessor;
           track = await createLocalAudioTrack({ processor: micProcessor });
+          createdTrack = track;
+          if (!isCurrent()) return;
+          micProcessor.setVolume(micVolumeRef.current);
+          micProcessorRef.current = micProcessor;
+          micGainErrorRef.current = null;
         } catch (processorError) {
+          if (!isCurrent()) return;
           // 处理器失败：退回普通音轨，并记下原因（界面可提示「麦克风音量不可调」）
           micProcessorRef.current = null;
           micGainErrorRef.current =
             processorError instanceof Error ? processorError.message : String(processorError);
           console.warn('[语音] 麦克风增益处理器初始化失败，退回普通音轨：', processorError);
           track = await createLocalAudioTrack();
+          createdTrack = track;
+          if (!isCurrent()) return;
         }
         await lkRoom.localParticipant.publishTrack(track);
-        await lkRoom.startAudio();
+        trackPublished = true;
+        if (!isCurrent()) return;
+        await lkRoom.startAudio().catch(() => { if (isCurrent()) patch({ audioBlocked: true }); });
+        if (!isCurrent()) return;
         // 关键：立刻解锁 AudioContext，否则音量调节不会有任何效果
         await resumeAudioContext();
+        if (!isCurrent()) return;
         setState((prev) =>
           prev
             ? {
@@ -460,6 +489,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         );
         notify(`已进入「${room.name}」，可以说话了`);
       } catch (micError) {
+        if (!trackPublished) createdTrack?.stop();
+        if (!isCurrent()) return;
         setState((prev) =>
           prev
             ? {
@@ -473,13 +504,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         notify('已进入频道，但麦克风没有开起来（大概率是证书未信任或没授权）', 'error');
       }
     } catch (error) {
+      if (!isCurrent()) return;
+      joinEpoch.current++; joiningRef.current = false;
       roomRef.current = null;
+      pendingRoomRef.current = null;
       setState(null);
+      detachAll();
+      await connectingRoom?.disconnect().catch(() => undefined);
       notify(error instanceof Error ? error.message : '进入语音频道失败', 'error');
     } finally {
-      joiningRef.current = false;
+      if (!isCurrent()) {
+        createdTrack?.stop();
+        await connectingRoom?.disconnect().catch(() => undefined);
+      }
+      if (operation === joinEpoch.current) joiningRef.current = false;
     }
-  }, [applyDeafen, detachAll, leave, notify, resumeAudioContext, state?.roomId, user]);
+  }, [applyDeafen, detachAll, notify, patch, resumeAudioContext, state?.roomId, user]);
 
   /** 闭麦 / 开麦：控制自己是否把声音发给别人 */
   const toggleMic = useCallback(async () => {
@@ -489,32 +529,53 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       return;
     }
     const participant = room.localParticipant;
+    const operation = joinEpoch.current;
+    // Permission prompts and publication can take seconds. Ignore repeated clicks until
+    // this room's current toggle settles, without blocking a later room's operation.
+    if (joiningRef.current || micToggleEpoch.current === operation) return;
+    micToggleEpoch.current = operation;
+    const isCurrent = () => roomRef.current === room && operation === joinEpoch.current;
     const publication = participant.getTrackPublication(Track.Source.Microphone) as
       | LocalTrackPublication
       | undefined;
-    if (current.micMuted) {
-      try {
-        if (!publication || !publication.track) {
-          const track = await createLocalAudioTrack();
-          await participant.publishTrack(track);
-        } else {
-          await (publication.track as LocalAudioTrack).unmute();
+    try {
+      if (current.micMuted) {
+        let newTrack: LocalAudioTrack | null = null;
+        try {
+          if (!publication || !publication.track) {
+            const track = await createLocalAudioTrack();
+            newTrack = track;
+            if (!isCurrent()) { track.stop(); return; }
+            await participant.publishTrack(track);
+            if (!isCurrent()) { track.stop(); return; }
+          } else {
+            await (publication.track as LocalAudioTrack).unmute();
+            if (!isCurrent()) return;
+          }
+          await room.startAudio().catch(() => { if (isCurrent()) patch({ audioBlocked: true }); });
+          if (!isCurrent()) return;
+          patch({ micMuted: false, micError: null });
+          void room.localParticipant.setAttributes({ muted: '0' }).catch(() => undefined);
+          notify('已开麦，队友能听到你了');
+        } catch (error) {
+          newTrack?.stop();
+          if (!isCurrent()) return;
+          notify(error instanceof Error ? error.message : '开麦失败', 'error');
         }
-        await room.startAudio();
-        patch({ micMuted: false, micError: null });
-        void room.localParticipant.setAttributes({ muted: '0' }).catch(() => undefined);
-        notify('已开麦，队友能听到你了');
-      } catch (error) {
-        notify(error instanceof Error ? error.message : '开麦失败', 'error');
+      } else {
+        if (publication?.track) {
+          await (publication.track as LocalAudioTrack).mute();
+        }
+        if (!isCurrent()) return;
+        patch({ micMuted: true });
+        // 广播出去，队友那边就能看到「闭麦」标识
+        void room.localParticipant.setAttributes({ muted: '1' }).catch(() => undefined);
+        notify('已闭麦，队友听不到你了');
       }
-    } else {
-      if (publication?.track) {
-        await (publication.track as LocalAudioTrack).mute();
-      }
-      patch({ micMuted: true });
-      // 广播出去，队友那边就能看到「闭麦」标识
-      void room.localParticipant.setAttributes({ muted: '1' }).catch(() => undefined);
-      notify('已闭麦，队友听不到你了');
+    } catch (error) {
+      if (isCurrent()) notify(error instanceof Error ? error.message : '麦克风切换失败', 'error');
+    } finally {
+      if (micToggleEpoch.current === operation) micToggleEpoch.current = null;
     }
   }, [notify, patch, state]);
 
