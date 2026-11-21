@@ -2,11 +2,13 @@ package com.gmsr.scheduler.repository;
 
 import com.gmsr.scheduler.domain.BossRun;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -54,4 +56,23 @@ public interface BossRunRepository extends JpaRepository<BossRun, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from BossRun r where r.id in :ids order by r.id")
     List<BossRun> findAllByIdForUpdate(@Param("ids") List<Long> ids);
+
+    /** Lock in the same order as trip edits and update only completion fields. */
+    @Modifying
+    @Query(value = """
+            with targets as materialized (
+                select candidate.id
+                from boss_run candidate
+                join boss on boss.id = candidate.boss_id
+                where candidate.status <> 'PLANNED'
+                  and (cast(:monthly as boolean) is null or boss.monthly = cast(:monthly as boolean))
+                order by candidate.id
+                for update of candidate
+            )
+            update boss_run run
+               set status = 'PLANNED', updated_at = :updatedAt
+              from targets
+             where run.id = targets.id
+            """, nativeQuery = true)
+    int resetStatuses(@Param("monthly") Boolean monthly, @Param("updatedAt") Instant updatedAt);
 }

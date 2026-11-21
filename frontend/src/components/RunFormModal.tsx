@@ -42,7 +42,7 @@ export default function RunFormModal({
         tier: form.tier || undefined,
         runIndex: form.runIndex ? Number(form.runIndex) : undefined,
         scheduled: form.scheduled,
-        status: form.status,
+        status: initial?.status === form.status ? undefined : form.status,
         note: form.note,
       };
       if (initial) {

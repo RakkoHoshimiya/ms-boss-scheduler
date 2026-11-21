@@ -13,6 +13,8 @@ import com.gmsr.scheduler.repository.BossRunRepository;
 import com.gmsr.scheduler.security.AdminAccountInitializer;
 import com.gmsr.scheduler.security.PlayerAccountInitializer;
 import com.gmsr.scheduler.security.SecurityStartupCheck;
+import jakarta.persistence.EntityManager;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 融合车（combo）的趟次一致性。
@@ -62,6 +67,10 @@ class ComboRunTest {
     private BossRepository bossRepository;
     @Autowired
     private BossRunRepository runRepository;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+    @Autowired
+    private EntityManager entityManager;
     @Autowired
     private com.gmsr.scheduler.repository.BossGroupRepository groupRepository;
     @Autowired
@@ -240,6 +249,86 @@ class ComboRunTest {
         } finally {
             cleanup(f);
         }
+    }
+
+    @Test
+    @DisplayName("旧快照只改状态时保留其他事务已提交的排班时间和备注")
+    void statusOnlyWritePreservesCommittedScheduleMetadata() {
+        Fixture f = createFixture("RUNSTATUS" + System.currentTimeMillis());
+        try {
+            var run = runService.create(new RunRequest(f.plain().getId(), "H", null, "Thursday", null, "old note"));
+            TransactionTemplate independent = new TransactionTemplate(transactionManager);
+            independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            independent.executeWithoutResult(status -> {
+                BossRun stale = runRepository.findById(run.id()).orElseThrow();
+                independent.executeWithoutResult(other -> runService.update(
+                        run.id(), new RunRequest(run.bossId(), "H", null, "Friday", null, "new note")));
+
+                assertEquals("Thursday", stale.getScheduled());
+                stale.setStatus(BossRun.Status.DONE);
+                runRepository.flush();
+            });
+
+            BossRun persisted = runRepository.findById(run.id()).orElseThrow();
+            assertEquals("Friday", persisted.getScheduled());
+            assertEquals("new note", persisted.getNote());
+            assertEquals(BossRun.Status.DONE, persisted.getStatus());
+        } finally {
+            cleanup(f);
+        }
+    }
+
+    @Test
+    @DisplayName("每周和每月分别重置，手动重置覆盖两类车次")
+    void statusResetRespectsBossCadence() {
+        new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+            transaction.setRollbackOnly();
+            String tag = "RESET" + System.nanoTime();
+            var group = new com.gmsr.scheduler.domain.BossGroup();
+            group.setName(tag);
+            groupRepository.save(group);
+
+            Boss weekly = new Boss();
+            weekly.setGroup(group);
+            weekly.setName(tag + "_W");
+            bossRepository.save(weekly);
+            Boss monthly = new Boss();
+            monthly.setGroup(group);
+            monthly.setName(tag + "_M");
+            monthly.setMonthly(true);
+            bossRepository.save(monthly);
+
+            long weeklyId = runService.create(new RunRequest(
+                    weekly.getId(), null, null, "Thursday", "DONE", "weekly note")).id();
+            long monthlyId = runService.create(new RunRequest(
+                    monthly.getId(), null, null, "Sunday", "CANCELED", "monthly note")).id();
+            Instant resetAt = Instant.parse("2026-11-01T00:00:00Z");
+
+            runRepository.resetStatuses(false, resetAt);
+            entityManager.clear();
+            assertEquals(BossRun.Status.PLANNED, runRepository.findById(weeklyId).orElseThrow().getStatus());
+            assertEquals(BossRun.Status.CANCELED, runRepository.findById(monthlyId).orElseThrow().getStatus());
+
+            runService.updateStatus(weeklyId, "DONE");
+            runRepository.resetStatuses(true, resetAt);
+            entityManager.clear();
+            assertEquals(BossRun.Status.DONE, runRepository.findById(weeklyId).orElseThrow().getStatus());
+            assertEquals(BossRun.Status.PLANNED, runRepository.findById(monthlyId).orElseThrow().getStatus());
+
+            runService.updateStatus(monthlyId, "CANCELED");
+            runRepository.resetStatuses(null, resetAt);
+            entityManager.clear();
+            BossRun weeklyRun = runRepository.findById(weeklyId).orElseThrow();
+            BossRun monthlyRun = runRepository.findById(monthlyId).orElseThrow();
+            assertEquals(BossRun.Status.PLANNED, weeklyRun.getStatus());
+            assertEquals(BossRun.Status.PLANNED, monthlyRun.getStatus());
+            assertEquals(resetAt, weeklyRun.getUpdatedAt());
+            assertEquals(resetAt, monthlyRun.getUpdatedAt());
+            assertEquals("Thursday", weeklyRun.getScheduled());
+            assertEquals("Sunday", monthlyRun.getScheduled());
+            assertEquals("weekly note", weeklyRun.getNote());
+            assertEquals("monthly note", monthlyRun.getNote());
+        });
     }
 
     @Test

@@ -55,26 +55,17 @@ export default function MyRunsPage() {
 
   const runById = useMemo(() => new Map(runs.map((run) => [run.id, run])), [runs]);
 
-;
-
-  /**
-   * 标记状态。
-   * 融合车是「要打全打」，所以标记某一趟时要**同步更新该趟在全部成员 BOSS 上的记录** ——
-   * 否则群友得为同一趟车连点 7 次「已完成」，而且只点一次时其它页面还显示未完成。
-   */
-  const mark = async (runIds: number[], status: 'DONE' | 'PLANNED') => {
+  /** 一次请求标记整趟融合车，使用群友本人所在的车次提交。 */
+  const mark = async (run: MergedPlayerRun, status: 'DONE' | 'PLANNED') => {
     if (marking) return;
     setMarking(true);
     try {
-      const updatedStatuses: Array<{ id: number; status: PlayerRunView['status'] }> = [];
-      for (const runId of runIds) {
-        const updated = await api.setRunStatus(runId, status);
-        updatedStatuses.push({ id: updated.id, status: updated.status });
-      }
-      const byId = new Map(updatedStatuses.map((x) => [x.id, x.status]));
-      setRuns((prev) => prev.map((item) => (byId.has(item.id) ? { ...item, status: byId.get(item.id)! } : item)));
+      const updated = await api.setRunStatus(run.runId, status);
+      const affected = new Set(run.groupRunIds.filter((id) => runById.get(id)?.tier === updated.tier));
+      affected.add(updated.id);
+      setRuns((prev) => prev.map((item) => (affected.has(item.id) ? { ...item, status: updated.status } : item)));
       setMyRuns((prev) =>
-        prev.map((item) => (byId.has(item.runId) ? { ...item, status: byId.get(item.runId)! } : item)),
+        prev.map((item) => (affected.has(item.runId) ? { ...item, status: updated.status } : item)),
       );
       notify(status === 'DONE' ? '整趟车都标记完成啦，辛苦！' : '已改回未完成');
     } catch (error) {
@@ -324,11 +315,11 @@ export default function MyRunsPage() {
                       </span>
                       <div className="spacer" />
                       {item.status === 'DONE' ? (
-                        <button className="btn small" onClick={() => void mark(item.groupRunIds, 'PLANNED')}>
+                        <button className="btn small" disabled={marking} onClick={() => void mark(item, 'PLANNED')}>
                           改回未完成
                         </button>
                       ) : (
-                        <button className="btn small primary" onClick={() => void mark(item.groupRunIds, 'DONE')}>
+                        <button className="btn small primary" disabled={marking} onClick={() => void mark(item, 'DONE')}>
                           {item.groupRunIds.length > 1 ? '✓ 整趟打完了' : '✓ 我打完了'}
                         </button>
                       )}

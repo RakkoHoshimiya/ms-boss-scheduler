@@ -353,7 +353,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         }
         applyDeafen(deafenedRef.current);
         void lkRoom.startAudio().then(refreshAudioState).catch(() => {
-          setState((prev) => (prev ? { ...prev, audioBlocked: true } : prev));
+          if (isCurrent()) patch({ audioBlocked: true });
         });
       };
 
@@ -631,11 +631,13 @@ const voiceDiag = useCallback(() => {
     if (!room) {
       return;
     }
+    const operation = joinEpoch.current;
+    const isCurrent = () => roomRef.current === room && operation === joinEpoch.current;
     try {
       await room.startAudio();
-      patch({ audioBlocked: false });
+      if (isCurrent()) patch({ audioBlocked: false });
     } catch {
-      notify('还是没能开启声音，试试点一下页面任意位置', 'error');
+      if (isCurrent()) notify('还是没能开启声音，试试点一下页面任意位置', 'error');
     }
   }, [notify, patch]);
 

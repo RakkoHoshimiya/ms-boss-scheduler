@@ -1,7 +1,6 @@
 package com.gmsr.scheduler.service;
 
 import com.gmsr.scheduler.domain.AppSetting;
-import com.gmsr.scheduler.domain.BossRun;
 import com.gmsr.scheduler.repository.AppSettingRepository;
 import com.gmsr.scheduler.repository.BossRunRepository;
 import java.time.DayOfWeek;
@@ -10,7 +9,6 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.annotation.PostConstruct;
@@ -169,7 +167,7 @@ public class WeeklyStatusResetService {
             if (!tryAdvisoryLock()) {
                 throw new BusinessException("另一个实例正在执行重置，请稍后重试");
             }
-            int count = doReset(null);
+            int count = runRepository.resetStatuses(null, Instant.now());
             saveMarker(MARKER_KEY, Instant.now());
             saveMarker(MONTHLY_MARKER_KEY, Instant.now());
             log.info("状态重置：管理员手动重置，{} 趟车次改回「未完成」", count);
@@ -217,7 +215,7 @@ public class WeeklyStatusResetService {
         if (!last.isBefore(due)) {
             return 0; // 已经重置过这个点了
         }
-        int changed = doReset(monthly ? Boolean.TRUE : Boolean.FALSE);
+        int changed = runRepository.resetStatuses(monthly, Instant.now());
         saveMarker(markerKey, due);
         log.info("状态重置（{}）：已把 {} 趟车次改回「未完成」（重置点 {}）",
                 monthly ? "每月" : "每周", changed, due);
@@ -290,42 +288,6 @@ public class WeeklyStatusResetService {
             candidate = candidate.minusMonths(1);
         }
         return candidate.toInstant();
-    }
-
-    /**
-     * 这个 BOSS 是否属于本次重置的范围。
-     *
-     * @param bossMonthly BOSS 自身的刷新周期（true = 按月）
-     * @param scope       {@code TRUE} 每月重置、{@code FALSE} 每周重置、{@code null} 全部
-     */
-    static boolean inResetScope(boolean bossMonthly, Boolean scope) {
-        return scope == null || bossMonthly == scope;
-    }
-
-    /**
-     * 重置车次状态。
-     *
-     * @param monthly {@code TRUE} 只清按月刷新的 BOSS；{@code FALSE} 只清每周刷新的 BOSS；
-     *                {@code null} 全部清（管理员手动重置）
-     */
-    private int doReset(Boolean monthly) {
-        List<BossRun> runs = runRepository.findAllByOrderByBossSortOrderAscRunIndexAsc();
-        int changed = 0;
-        for (BossRun run : runs) {
-            if (!inResetScope(run.getBoss().isMonthly(), monthly)) {
-                // 每月 BOSS 不参与每周重置（反之亦然）—— 这正是「老黑能量车一周被清一次」的修复点
-                continue;
-            }
-            if (run.getStatus() != BossRun.Status.PLANNED) {
-                run.setStatus(BossRun.Status.PLANNED);
-                changed++;
-            }
-        }
-        if (changed > 0) {
-            runRepository.saveAll(runs);
-            runRepository.flush();
-        }
-        return changed;
     }
 
     private Instant readMarker(String key) {

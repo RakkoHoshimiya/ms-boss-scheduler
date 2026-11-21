@@ -1,8 +1,6 @@
 package com.gmsr.scheduler.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -156,17 +154,4 @@ class WeeklyStatusResetServiceTest {
         assertEquals(at(12, 1, 8, 0).toInstant(), nextMonthly(at(11, 1, 8, 0)));
     }
 
-    @Test
-    @DisplayName("重置范围：每月 BOSS 不参与每周重置，反之亦然")
-    void resetScopeSeparatesMonthlyAndWeekly() {
-        // 每周重置（scope = FALSE）
-        assertTrue(WeeklyStatusResetService.inResetScope(false, Boolean.FALSE));
-        assertFalse(WeeklyStatusResetService.inResetScope(true, Boolean.FALSE));
-        // 每月重置（scope = TRUE）
-        assertTrue(WeeklyStatusResetService.inResetScope(true, Boolean.TRUE));
-        assertFalse(WeeklyStatusResetService.inResetScope(false, Boolean.TRUE));
-        // 手动重置（scope = null）两种都清
-        assertTrue(WeeklyStatusResetService.inResetScope(true, null));
-        assertTrue(WeeklyStatusResetService.inResetScope(false, null));
-    }
 }

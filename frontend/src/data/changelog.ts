@@ -34,6 +34,17 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 
 export const CHANGE_LOG: ChangeGroup[] = [
   {
+    date: '11/22',
+    title: '排班状态、语音与备份稳定性',
+    entries: [
+      { type: 'fix', text: '修改车次时间或备注时，会保留他人刚标记的完成状态；定时重置也会保留正在更新的排班内容' },
+      { type: 'fix', text: '在「我的车次」标记融合车时，一次操作就能更新整趟车，避免部分车次提示失败' },
+      { type: 'fix', text: '返回排班页时，较早发出的同步请求不会再把刚保存的状态切回旧值' },
+      { type: 'fix', text: '切换语音房间后，上一间房的音频请求不会再误触发或关闭当前房间的开启声音提示' },
+      { type: 'improve', text: '部署会使用本次源码重新构建并等待服务就绪，数据库和附件备份校验通过后才会显示为可恢复的备份' },
+    ],
+  },
+  {
     date: '11/21',
     title: '按月刷新的 BOSS 不再跟随每周重置',
     entries: [

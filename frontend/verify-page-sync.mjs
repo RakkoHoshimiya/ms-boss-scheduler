@@ -17,16 +17,31 @@ let run = { id: 1, bossId: 1, bossName: boss.name, groupId: 1, groupName: boss.g
 const otherBoss={...boss,id:2,name:'另一个BOSS'};
 const otherRun={...run,id:2,bossId:2,bossName:otherBoss.name,scheduled:'BOSS-B-only',members:[],memberCount:0};
 let runRequests = 0, delay = false, release;
-globalThis.fetch = async url => {
+let canSchedule = true, ownRunId = 1, formSave;
+const statusWrites = [];
+globalThis.fetch = async (url, options) => {
   let body = [];
-  if (url === '/api/auth/me') body = { id: 7, username: 'test', displayName: '测试用户', role: 'VIEWER', canSchedule: true, playerId: 7 };
+  const statusRoute = url.match(/^\/api\/runs\/(\d+)\/status$/);
+  if (url === '/api/auth/me') body = { id: 7, username: 'test', displayName: '测试用户', role: 'VIEWER', canSchedule, playerId: 7 };
   else if (url === '/api/runs') {
-    runRequests++; body = [structuredClone(run),otherRun];
+    runRequests++; body = structuredClone([run, otherRun]);
     if (delay) { delay = false; await new Promise(resolve => { release = resolve; }); }
+  } else if (statusRoute) {
+    const id = Number(statusRoute[1]);
+    statusWrites.push(id);
+    if (!canSchedule && id !== ownRunId) return new Response(JSON.stringify({ message: '不在这趟车上' }), { status: 403 });
+    const { status } = JSON.parse(options.body);
+    if (id === run.id || boss.comboKey) run.status = status;
+    if (id === otherRun.id || boss.comboKey) otherRun.status = status;
+    body = id === run.id ? run : otherRun;
+  } else if (url === '/api/runs/1' && options?.method === 'PUT') {
+    formSave = JSON.parse(options.body);
+    run = { ...run, ...formSave };
+    body = run;
   } else if (url === '/api/bosses') body = [boss,otherBoss];
   else if (url === '/api/boss-groups') body = [{ id: 1, name: boss.groupName, sortOrder: 0, bossCount: 1 }];
   else if (url === '/api/players') body = [{ id: 7, nickname: member.playerNickname, active: true, sortOrder: 0, characterCount: 1, characters: [{ ...member, id: 1, sortOrder: 0 }] }];
-  else if (url === '/api/players/7/runs') body = [{ ...run, runId: 1, characterId: 1, characterJob: 'Kanna', characterPower: 100 }];
+  else if (url === '/api/players/7/runs') body = [{ ...(ownRunId === run.id ? run : otherRun), runId: ownRunId, characterId: 1, characterJob: 'Kanna', characterPower: 100 }];
   else if (url === '/api/status-reset') body = { lastResetAt: '2026-11-12T00:00:00Z', nextResetAt: '2026-11-19T00:00:00Z' };
   else if (url === '/api/client-info') body = { mobile: false };
   return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
@@ -43,6 +58,19 @@ assert(document.body.textContent.includes('原始时间'));
 run.scheduled = '切回后最新时间'; const before = runRequests;
 w.dispatchEvent(new w.Event('focus')); document.dispatchEvent(new w.Event('visibilitychange'));
 await wait(); assert(document.body.textContent.includes('切回后最新时间')); assert.equal(runRequests, before + 1, 'Focus and visibility events should coalesce');
+
+// A refresh started before a fast button action must not undo its successful result.
+await wait(1100);
+delay = true; release = undefined;
+w.dispatchEvent(new w.Event('focus')); await wait(); assert(release);
+const existingRunRow = () => document.querySelector('tr.row-mine');
+assert(existingRunRow()?.querySelector('.status-PLANNED'));
+existingRunRow().querySelector('.row-actions .primary').click(); await wait();
+assert(existingRunRow()?.querySelector('.status-DONE'), 'The status mutation must finish before the earlier refresh');
+const beforeDeferredRefresh = runRequests;
+release(); await wait(); await wait();
+assert(existingRunRow()?.querySelector('.status-DONE'), 'The earlier refresh must not revert a completed status');
+assert.equal(runRequests, beforeDeferredRefresh + 1, 'Discarding a stale response must fetch a fresh snapshot');
 
 await route('#/bosses'); document.querySelector('.boss-card').click(); await wait(); await wait();
 button('设置').click(); await wait();
@@ -80,6 +108,31 @@ otherBoss.comboKey='test-combo';otherBoss.comboName='测试融合车';otherBoss.
 await route('#/changelog');await route('#/bosses');document.querySelector('.boss-card').click();await wait();await wait();
 assert(document.querySelector('h1').textContent.includes('测试融合车'));w.dispatchEvent(new w.Event('focus'));await wait();await wait();
 assert(document.querySelector('h1').textContent.includes('测试融合车'),'Syncing must keep the selected virtual combo detail open');
+
+// A reset performed while the settings form is open must survive an unrelated edit.
+button('设置').click(); await wait();
+const form = document.querySelector('#run-form');
+assert.equal([...form.querySelectorAll('select')].at(-1).value, 'DONE');
+run.status = 'PLANNED';
+type(form.querySelector('input[type="text"]'), '仅修改车次时间');
+form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+await wait(); await wait();
+assert.equal(formSave.scheduled, '仅修改车次时间');
+assert(!Object.hasOwn(formSave, 'status'), 'An unchanged status must be omitted from an unrelated form update');
+assert.equal(run.status, 'PLANNED');
+
+// Historical group rosters may be incomplete. An ordinary member must write via their own row.
+canSchedule = false; ownRunId = otherRun.id;
+run.members = []; run.memberCount = 0; otherRun.members = [member]; otherRun.memberCount = 1;
+localStorage.setItem('gmsr.token', 'member-session');
+w.dispatchEvent(new w.StorageEvent('storage', { key: 'gmsr.token', newValue: 'member-session' }));
+await wait(); await route('#/');
+const beforeGroupMark = statusWrites.length;
+button('✓ 整趟打完了').click(); await wait();
+assert.deepEqual(statusWrites.slice(beforeGroupMark), [ownRunId], 'Mark the trip once using the signed-in member row');
+assert.equal(run.status, 'DONE');
+assert.equal(otherRun.status, 'DONE');
+assert(button('改回未完成'), 'A successful combo status should be reflected without a page reload');
 console.log('PAGE_SYNC_PASS: focus/visibility sync, event coalescing, hidden pause, unsaved input protection, late-response protection, my-runs refresh');
 console.log('BOSS_SELECTION_PASS: delayed old loads cannot overwrite a newly selected BOSS');
 dom.window.close(); process.exit(0);

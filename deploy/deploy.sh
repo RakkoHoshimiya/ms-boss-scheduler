@@ -30,19 +30,31 @@ SSH=(ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=yes -o "UserKnown
 SCP=(scp -i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KNOWN_HOSTS" -r)
 
 deploy_backend() {
+  local stage failure
   echo "==> 同步后端源码到服务器"
-  "${SSH[@]}" "$SERVER" 'mkdir -p /root/gmsr-build'
-  "${SCP[@]}" "$PROJECT_DIR/backend" "$SERVER:/root/gmsr-build/"
-  echo "==> 服务器上编译打包"
-  "${SSH[@]}" "$SERVER" 'cd /root/gmsr-build/backend && mvn -B -q package -DskipTests -Dfile.encoding=UTF-8'
-  echo "==> 替换 jar 并重启服务"
-  "${SSH[@]}" "$SERVER" bash -s <<'BACKEND'
+  stage=$("${SSH[@]}" "$SERVER" 'umask 077; mkdir -p /root/gmsr-build; mktemp -d /root/gmsr-build/.gmsr-backend.XXXXXXXX')
+  [[ "$stage" =~ ^/root/gmsr-build/\.gmsr-backend\.[a-zA-Z0-9]+$ ]] || { echo '无效的后端构建目录' >&2; return 1; }
+  if "${SCP[@]}" "$PROJECT_DIR/backend/pom.xml" "$PROJECT_DIR/backend/src" "$SERVER:$stage/"; then
+    echo "==> 编译后端并在成功后替换 jar"
+  else
+    failure=$?
+    "${SSH[@]}" "$SERVER" rm -rf -- "$stage" || true
+    return "$failure"
+  fi
+  "${SSH[@]}" "$SERVER" bash -s -- "$stage" <<'BACKEND'
 set -eEuo pipefail
 umask 077
+stage="$1"
+[[ "$stage" =~ ^/root/gmsr-build/\.gmsr-backend\.[a-zA-Z0-9]+$ ]] || exit 1
+trap 'rm -rf -- "$stage"' EXIT
+(cd "$stage" && mvn -B -q package -DskipTests -Dfile.encoding=UTF-8)
+
 live=/opt/gmsr/app/gmsr-scheduler.jar
 previous=/opt/gmsr/app/.rollback/gmsr-scheduler-previous.jar
 had_previous=0
 install -d -m 700 /opt/gmsr/app/.rollback
+exec 9>/opt/gmsr/app/.rollback/deploy.lock
+flock -n 9 || { echo '已有后端正在切换版本，请稍后重试' >&2; exit 1; }
 if [[ -f "$live" ]]; then
   install -m 600 "$live" "$previous.next"
   mv -f -- "$previous.next" "$previous"
@@ -72,7 +84,7 @@ rollback() {
   exit "$failure"
 }
 trap rollback ERR
-install -o gmsr -g gmsr -m 644 /root/gmsr-build/backend/target/gmsr-scheduler.jar "$live.next"
+install -o gmsr -g gmsr -m 644 "$stage/target/gmsr-scheduler.jar" "$live.next"
 mv -f -- "$live.next" "$live"
 systemctl restart gmsr-backend
 wait_ready

@@ -35,10 +35,26 @@ mkdir -p "$BACKUP_DIR"
 exec 9>"$BACKUP_DIR/.gmsr-backup.lock"
 flock -n 9 || die "已有备份在运行，本次跳过"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT="$BACKUP_DIR/gmsr-$STAMP.dump"
-TMP_IN_CONTAINER="/tmp/gmsr-backup-$STAMP.dump"
+DB_NAME_IN_SET="gmsr-$STAMP.dump"
+CONFIG_NAME_IN_SET="gmsr-conf-$STAMP.tar.gz"
+NOTES_NAME_IN_SET="gmsr-notes-$STAMP.tar.gz"
+for archive in "$DB_NAME_IN_SET" "$CONFIG_NAME_IN_SET" "$NOTES_NAME_IN_SET"; do
+    [[ ! -e "$BACKUP_DIR/$archive" && ! -L "$BACKUP_DIR/$archive" ]] || die "备份时间戳已存在：$STAMP"
+done
+stage="$(mktemp -d "$BACKUP_DIR/.gmsr-backup.XXXXXXXX")"
+TMP_IN_CONTAINER="/tmp/gmsr-backup-$STAMP-${stage##*.}.dump"
+OUT="$stage/$DB_NAME_IN_SET"
+CONF="$stage/$CONFIG_NAME_IN_SET"
+published=()
+complete=0
 
-cleanup() { docker exec "$CONTAINER" rm -f "$TMP_IN_CONTAINER" 2>/dev/null || true; }
+cleanup() {
+    docker exec "$CONTAINER" rm -f "$TMP_IN_CONTAINER" 2>/dev/null || true
+    if [[ "$complete" == 0 && "${#published[@]}" -gt 0 ]]; then
+        rm -f -- "${published[@]}"
+    fi
+    rm -rf -- "$stage"
+}
 trap cleanup EXIT
 
 echo "[$(date '+%F %T')] 开始备份 $DB_NAME.$DB_SCHEMA"
@@ -57,8 +73,6 @@ chmod 600 "$OUT"
 echo "  ✓ 数据库 $OUT ($(du -h "$OUT" | cut -f1))  校验通过"
 
 # ---------------------------------------------------------------- 2) 配置
-CONF="$BACKUP_DIR/gmsr-conf-$STAMP.tar.gz"
-
 # 必需：缺任何一个都说明这台机器的部署不完整，备份应失败并报警
 REQUIRED=(
     opt/gmsr/gmsr.env
@@ -105,15 +119,23 @@ NOTES_DIR="${GMSR_NOTES_DIRECTORY:-/opt/gmsr/data/note-attachments}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 [[ -f "$HERE/backup-attachments.sh" ]] || die "缺少附件备份工具"
 [[ -d "$NOTES_DIR" ]] || die "附件目录不存在，不能生成完整备份"
-bash "$HERE/backup-attachments.sh" "$NOTES_DIR" "$BACKUP_DIR/gmsr-notes-$STAMP.tar.gz"
+bash "$HERE/backup-attachments.sh" "$NOTES_DIR" "$stage/$NOTES_NAME_IN_SET"
 
 # ---------------------------------------------------------------- 3) 应用 jar
 if [[ -f /opt/gmsr/app/gmsr-scheduler.jar ]]; then
-    cp /opt/gmsr/app/gmsr-scheduler.jar "$BACKUP_DIR/gmsr-scheduler-latest.jar"
+    install -m 600 /opt/gmsr/app/gmsr-scheduler.jar "$stage/gmsr-scheduler-latest.jar"
+    mv -f -- "$stage/gmsr-scheduler-latest.jar" "$BACKUP_DIR/gmsr-scheduler-latest.jar"
     echo "  ✓ 应用 jar 已更新（覆盖式）"
 else
     echo "  ⚠ 未找到应用 jar，跳过（不影响数据库与配置备份）" >&2
 fi
+
+# The dump is the restore entry point. Publish it only after both companion archives.
+for archive in "$CONFIG_NAME_IN_SET" "$NOTES_NAME_IN_SET" "$DB_NAME_IN_SET"; do
+    mv -- "$stage/$archive" "$BACKUP_DIR/$archive"
+    published+=("$BACKUP_DIR/$archive")
+done
+complete=1
 
 # ---------------------------------------------------------------- 4) 清理过期
 DELETED=0

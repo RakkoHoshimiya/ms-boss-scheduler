@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /** Fetch in the background, then commit only if the user has not started editing. */
 export function usePageSync(prepare: () => Promise<() => void>, blocked = false, contextKey = '') {
   const current = useRef({ prepare, blocked }); current.current = { prepare, blocked };
   const [status, setStatus] = useState<'idle' | 'syncing' | 'deferred' | 'error'>('idle');
   const retry = useRef<() => void>(() => undefined);
+  const epoch = useRef(0);
+  useLayoutEffect(() => {
+    // A mutation can finish while an older read is still in flight.
+    if (blocked) epoch.current++;
+  }, [blocked]);
   useEffect(() => {
-    let disposed = false, running = false, deferred = false, epoch = 0, lastStart = 0;
+    let disposed = false, running = false, deferred = false, lastStart = 0;
     const protectedEdit = () => current.current.blocked || Boolean(document.querySelector('.modal'));
     const defer = () => { deferred = true; setStatus('deferred'); };
     async function sync(force = false) {
@@ -14,17 +19,21 @@ export function usePageSync(prepare: () => Promise<() => void>, blocked = false,
       if (protectedEdit()) { defer(); return; }
       if (!force && Date.now() - lastStart < 1000) return;
       lastStart = Date.now(); running = true; deferred = false; setStatus('syncing');
-      const started = epoch;
+      const started = epoch.current;
       try {
         const commit = await current.current.prepare();
         if (disposed) return;
-        if (protectedEdit() || started !== epoch) { defer(); return; }
+        if (protectedEdit() || started !== epoch.current) { defer(); return; }
         commit(); setStatus('idle');
-      } catch { if (!disposed) setStatus('error'); }
+      } catch {
+        if (disposed) return;
+        if (protectedEdit() || started !== epoch.current) defer();
+        else setStatus('error');
+      }
       finally { running = false; }
     }
     const wake = () => { void sync(); };
-    const edit = () => { epoch++; };
+    const edit = () => { epoch.current++; };
     const observer = new MutationObserver(() => { if (deferred && !protectedEdit()) void sync(true); });
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('focus', wake);

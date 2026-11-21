@@ -8,10 +8,12 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.DynamicUpdate;
 
 /** 车次：某个 BOSS 的一次组队。不再按周分组 —— 排班是固定的，时间不参与组织。 */
 @Entity
 @Table(name = "boss_run")
+@DynamicUpdate
 public class BossRun extends AuditedEntity {
 
     public enum Status {

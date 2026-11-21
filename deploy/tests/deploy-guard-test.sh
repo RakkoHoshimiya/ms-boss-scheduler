@@ -18,20 +18,39 @@ exit 0
 STUB
 cat > "$WORK/bin/scp" <<'STUB'
 #!/usr/bin/env bash
+printf '%s\n' "$@" >> "$WORK/scp.log"
 exit "${SCP_FAILURE:-0}"
 STUB
 cat > "$WORK/bin/ssh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$WORK/ssh.log"
 case "$*" in
+ *'.gmsr-backend.'*'mktemp'*|*'mktemp'*'.gmsr-backend.'*) printf '/root/gmsr-build/.gmsr-backend.Build1234\n';;
  *'mktemp -d'*) printf '/opt/1panel/www/.gmsr-deploy.Test1234\n';;
- *' bash -s') cat > "$WORK/backend-body.sh"; [[ -z "${SSH_BACKEND_FAILURE:-}" ]] || exit "$SSH_BACKEND_FAILURE";;
+ *' bash -s -- /root/gmsr-build/.gmsr-backend.'*)
+  cat > "$WORK/backend-body.sh"
+  [[ -z "${SSH_BACKEND_FAILURE:-}" ]] || exit "$SSH_BACKEND_FAILURE"
+  ;;
 esac
 STUB
 cat > "$WORK/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 exit 0
 STUB
+cat > "$WORK/bin/mvn" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+test -f pom.xml
+test -d src
+test ! -e target/stale.class
+test ! -e src/stale.sql
+printf '%s\n' "$PWD" >> "$WORK/maven-build.log"
+mkdir -p target
+printf 'new jar' > target/gmsr-scheduler.jar
+STUB
+if ! command -v flock > /dev/null; then
+ printf '#!/usr/bin/env bash\nexit 0\n' > "$WORK/bin/flock"
+fi
 cat > "$WORK/bin/install" <<'STUB'
 #!/usr/bin/env bash
 destination="${@: -1}"
@@ -92,6 +111,16 @@ fi
 grep -q 'KNOWN_HOSTS=' "$WORK/known-hosts.log"
 test "$(wc -l < "$WORK/ssh.log")" -eq 1
 
+# A backend transfer failure cleans up its build directory before remote execution.
+: > "$WORK/ssh.log"
+set +e
+SCP_FAILURE=23 bash "$ROOT/deploy/deploy.sh" backend > "$WORK/backend-upload.log" 2>&1
+rc=$?
+set -e
+test "$rc" = 23
+grep -q 'rm -rf -- /root/gmsr-build/\.gmsr-backend\.Build1234$' "$WORK/ssh.log"
+test ! -e "$WORK/backend-body.sh"
+
 # Backend rejection in all mode must not proceed to a frontend build or upload.
 rm -f "$WORK/npm.log"
 : > "$WORK/ssh.log"
@@ -101,7 +130,8 @@ rc=$?
 set -e
 test "$rc" = 27
 test ! -f "$WORK/npm.log"
-! grep -q 'mktemp -d' "$WORK/ssh.log"
+! grep -q '\.gmsr-deploy\.' "$WORK/ssh.log"
+grep -q '\.gmsr-backend\.' "$WORK/ssh.log"
 
 # Extract the actual remote publication body and map only its root into our fixture.
 awk '/<<\047REMOTE\047/ {copy=1; next} /^REMOTE$/ {copy=0} copy {print}' "$ROOT/deploy/deploy.sh" |
@@ -128,26 +158,44 @@ test "$(cat "$WORK/www/gmsr/assets/old.js")" = 'old bundle'
 test "$(cat "$WORK/www/gmsr/assets/ca-check.js")" = 'certificate helper'
 
 # Capture and execute the real backend readiness command using simulated HTTP results.
+: > "$WORK/scp.log"
 bash "$ROOT/deploy/deploy.sh" backend > "$WORK/backend.log" 2>&1
 test -s "$WORK/backend-body.sh"
-sed -e "s|/opt/gmsr/app|$WORK/app|g" -e "s|/root/gmsr-build/backend/target/gmsr-scheduler.jar|$WORK/build.jar|g" "$WORK/backend-body.sh" > "$WORK/backend-fixture.sh"
+grep -Fx "$ROOT/backend/pom.xml" "$WORK/scp.log"
+grep -Fx "$ROOT/backend/src" "$WORK/scp.log"
+! grep -Fx "$ROOT/backend" "$WORK/scp.log"
+grep -q '/root/gmsr-build/\.gmsr-backend\.Build1234' "$WORK/scp.log"
+sed -e "s|/opt/gmsr/app|$WORK/app|g" -e "s|/root/gmsr-build|$WORK/build|g" "$WORK/backend-body.sh" > "$WORK/backend-fixture.sh"
 mkdir -p "$WORK/app"
-printf 'new jar' > "$WORK/build.jar"
+mkdir -p "$WORK/build/backend/target" "$WORK/build/backend/src"
+touch "$WORK/build/backend/target/stale.class" "$WORK/build/backend/src/stale.sql"
+backend_stage="$WORK/build/.gmsr-backend.Build1234"
+run_backend() {
+ mkdir -p "$backend_stage/src"
+ touch "$backend_stage/pom.xml"
+ BACKEND_TEST=1 HEALTH="$1" bash "$WORK/backend-fixture.sh" "$backend_stage"
+}
 for state in error down; do
  printf 'old jar' > "$WORK/app/gmsr-scheduler.jar"
- if BACKEND_TEST=1 HEALTH="$state" bash "$WORK/backend-fixture.sh" > "$WORK/health.log" 2>&1; then
+ if run_backend "$state" > "$WORK/health.log" 2>&1; then
   echo "Unhealthy response was accepted: $state" >&2; exit 1
  fi
  test "$(cat "$WORK/app/gmsr-scheduler.jar")" = 'old jar'
  grep -q '已恢复上一版本' "$WORK/health.log" || { cat "$WORK/health.log"; exit 1; }
+ test ! -d "$backend_stage"
 done
 printf 'old jar' > "$WORK/app/gmsr-scheduler.jar"
-if BACKEND_TEST=1 SYSTEMCTL_FAIL=1 HEALTH=up bash "$WORK/backend-fixture.sh" > "$WORK/health.log" 2>&1; then echo 'Restart failure was accepted' >&2; exit 1; fi
+if SYSTEMCTL_FAIL=1 run_backend up > "$WORK/health.log" 2>&1; then echo 'Restart failure was accepted' >&2; exit 1; fi
 test "$(cat "$WORK/app/gmsr-scheduler.jar")" = 'old jar'
-BACKEND_TEST=1 HEALTH=up bash "$WORK/backend-fixture.sh" > "$WORK/health.log" 2>&1
+test ! -d "$backend_stage"
+run_backend up > "$WORK/health.log" 2>&1
 grep -q '后端已就绪' "$WORK/health.log"
 test "$(cat "$WORK/app/gmsr-scheduler.jar")" = 'new jar'
 test "$(cat "$WORK/app/.rollback/gmsr-scheduler-previous.jar")" = 'old jar'
+test ! -d "$backend_stage"
+test -f "$WORK/build/backend/target/stale.class"
+test -f "$WORK/build/backend/src/stale.sql"
+test "$(sort -u "$WORK/maven-build.log")" = "$backend_stage"
 grep -q 'microphone=(self)' "$ROOT/deploy/security-headers.inc"
 grep -q 'install .*deploy/backup-attachments.sh' "$ROOT/deploy/RESTORE.md"
-echo 'DEPLOY_GUARD_PASS: interrupted upload/publication preserves live entry, old assets/helpers remain, HTTP errors/DOWN/restart failure roll back, successful upgrade keeps previous JAR, voice policy and backup installation checked'
+echo 'DEPLOY_GUARD_PASS: isolated backend build excludes stale files, failed readiness or restart rolls back, failed frontend publication preserves entry and older assets'

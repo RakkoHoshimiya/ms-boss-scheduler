@@ -120,27 +120,7 @@ public class RunService {
     public RunView update(Long id, RunRequest request) {
         BossRun run = runRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("车次不存在：" + id));
-        BossTier originalTier = run.getTier();
-        int originalIndex = run.getRunIndex();
-        String originalCombo = run.getBoss().getComboKey();
-        // Locate the original trip before changing its identity. Lock all rows in id order,
-        // rather than locking one sibling first and deadlocking with another sibling editor.
-        List<BossRun> trip = comboTrip(run);
-        if (trip.stream().noneMatch(row -> row.getId().equals(id))) {
-            throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
-        }
-        lockTrip(trip);
-        for (BossRun target : trip) {
-            entityManager.refresh(target);
-            if (target.getTier() != originalTier || target.getRunIndex() != originalIndex
-                    || !java.util.Objects.equals(target.getBoss().getComboKey(), originalCombo)) {
-                throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
-            }
-        }
-        Set<Long> originalIds = trip.stream().map(BossRun::getId).collect(Collectors.toSet());
-        if (!originalIds.equals(comboTrip(run).stream().map(BossRun::getId).collect(Collectors.toSet()))) {
-            throw new ConflictException("融合车成员刚刚有变动，请刷新后重试");
-        }
+        List<BossRun> trip = lockCurrentTrip(run);
         if (request.bossId() != null && !request.bossId().equals(run.getBoss().getId())) {
             Boss boss = bossRepository.findById(request.bossId())
                     .orElseThrow(() -> new NotFoundException("BOSS 不存在：" + request.bossId()));
@@ -443,6 +423,29 @@ public class RunService {
         runRepository.findAllByIdForUpdate(trip.stream().map(BossRun::getId).sorted().toList());
     }
 
+    private List<BossRun> lockCurrentTrip(BossRun run) {
+        BossTier originalTier = run.getTier();
+        int originalIndex = run.getRunIndex();
+        String originalCombo = run.getBoss().getComboKey();
+        List<BossRun> trip = comboTrip(run);
+        if (trip.stream().noneMatch(row -> row.getId().equals(run.getId()))) {
+            throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
+        }
+        lockTrip(trip);
+        for (BossRun target : trip) {
+            entityManager.refresh(target);
+            if (target.getTier() != originalTier || target.getRunIndex() != originalIndex
+                    || !java.util.Objects.equals(target.getBoss().getComboKey(), originalCombo)) {
+                throw new ConflictException("这趟车刚刚有变动，请刷新后重试");
+            }
+        }
+        Set<Long> originalIds = trip.stream().map(BossRun::getId).collect(Collectors.toSet());
+        if (!originalIds.equals(comboTrip(run).stream().map(BossRun::getId).collect(Collectors.toSet()))) {
+            throw new ConflictException("融合车成员刚刚有变动，请刷新后重试");
+        }
+        return trip;
+    }
+
     /** 锁住多组车次（按 id 升序，避免与反向请求死锁）。 */
     private void lockTrips(List<BossRun>... groups) {
         java.util.TreeSet<Long> ids = new java.util.TreeSet<>();
@@ -507,7 +510,7 @@ public class RunService {
          * 只改一条会让「我的车次」里同一趟出现「戴米安已完成、其它待打」的错位，
          * 车次一览表合并后也看不出到底算不算完成。
          */
-        List<BossRun> trip = comboTrip(run);
+        List<BossRun> trip = lockCurrentTrip(run);
         for (BossRun target : trip) {
             target.setStatus(status);
         }

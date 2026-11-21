@@ -122,4 +122,30 @@ for(const logout of [false,true]){
  voice.toggleDeafen();assert.equal(a.volume,0);assert.equal(b.volume,.5,'Undeafen restores preferences, not 100%');
  await voice.leave(true);
 }
+// A late playback rejection from a departed room must not block the active room.
+{
+ const h=harness();let voice=h.render();await voice.join(channel);
+ const old=h.rooms[0], playback=deferred();
+ old.startAudio=()=>playback.promise;
+ old.emit('TrackSubscribed',{sid:'old-track',kind:'audio',setVolume(){},attach(){return{style:{},setAttribute(){},remove(){}};}});
+ voice=h.render();await voice.join({id:'two',name:'Room two'});
+ assert.equal(h.render().state.roomId,'two');
+ assert.equal(h.render().state.audioBlocked,false);
+ playback.reject(Error('old room playback was blocked'));await ticks();
+ assert.equal(h.render().state.audioBlocked,false,'Old track playback rejection must not affect the active room');
+ await voice.leave(true);
+}
+// Completing manual playback for a departed room cannot dismiss the active room's prompt.
+{
+ const h=harness();let voice=h.render();await voice.join(channel);
+ const old=h.rooms[0], playback=deferred();
+ old.startAudio=()=>playback.promise;
+ const pending=h.render().resumeAudio();
+ h.audioFails=true;voice=h.render();await voice.join({id:'two',name:'Room two'});
+ assert.equal(h.render().state.roomId,'two');
+ assert.equal(h.render().state.audioBlocked,true);
+ playback.resolve();await pending;
+ assert.equal(h.render().state.audioBlocked,true,'Old room playback success must not clear the active room prompt');
+ await voice.leave(true);
+}
 console.log('VOICE_LIFECYCLE_PASS: leave during token/connect/mic, logout, late event isolation, member preferences and global deafen');
