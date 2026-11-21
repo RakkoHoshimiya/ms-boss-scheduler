@@ -23,7 +23,12 @@ export default function RunsTablePage() {
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(true);
   /** 完成状态的重置时间（上次 / 下次），用于顶部说明 */
-  const [resetInfo, setResetInfo] = useState<{ lastResetAt?: string | null; nextResetAt?: string } | null>(null);
+  const [resetInfo, setResetInfo] = useState<{
+    lastResetAt?: string | null;
+    nextResetAt?: string;
+    lastMonthlyResetAt?: string | null;
+    nextMonthlyResetAt?: string;
+  } | null>(null);
   const [myRunIds, setMyRunIds] = useState<number[]>([]);
   const [marking, setMarking] = useState(false);
   const syncNotice = usePageSync(async () => {
@@ -139,6 +144,9 @@ export default function RunsTablePage() {
           <span className="muted">
             {' '}· 完成状态每周四 08:00 自动重置为「未完成」
             {resetInfo?.lastResetAt ? `（上次：${fmtResetTime(resetInfo.lastResetAt)}）` : ''}
+            {resetInfo?.nextMonthlyResetAt
+              ? `；按月刷新的 BOSS（如老黑能量车）只在每月 1 号 08:00 重置（下次：${fmtResetTime(resetInfo.nextMonthlyResetAt)}）`
+              : ''}
           </span>
         </span>
       </div>
@@ -207,6 +215,7 @@ export default function RunsTablePage() {
             <span className="muted">
               {boss.groupName} · 每车 {boss.capacity} 人 · {bossRuns.length} 趟
               {members.length > 0 ? ' · 要打全打' : ''}
+              {boss.monthly ? ' · 按月刷新（每月 1 号 08:00）' : ''}
             </span>
           </div>
           {isMobile ? (

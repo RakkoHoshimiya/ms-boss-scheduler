@@ -90,7 +90,8 @@ public class BossService {
                      * 这里保留字段以免破坏 API 契约，并在注释里说明是占位，
                      * 避免有人误以为 0 是真实值。
                      */
-                    0));
+                    0,
+                    boss.isMonthly()));
         }
         return result;
     }
@@ -248,6 +249,9 @@ public class BossService {
         }
         if (request.iconKey() != null) {
             boss.setIconKey(request.iconKey().isBlank() ? null : request.iconKey().trim());
+        }
+        if (request.monthly() != null) {
+            boss.setMonthly(request.monthly());
         }
         boss.setNote(request.note());
     }

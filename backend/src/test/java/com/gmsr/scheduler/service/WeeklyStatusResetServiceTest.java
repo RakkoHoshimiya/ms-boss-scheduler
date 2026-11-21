@@ -1,6 +1,8 @@
 package com.gmsr.scheduler.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -105,5 +107,66 @@ class WeeklyStatusResetServiceTest {
     void nextExactlyEight() {
         assertEquals(at(11, 5, 8, 0).toInstant(),
                 WeeklyStatusResetService.nextScheduledInstant(at(10, 29, 8, 0)));
+    }
+
+    // ==================== 按月刷新（老黑能量车） ====================
+
+    private static Instant lastMonthly(ZonedDateTime now) {
+        return WeeklyStatusResetService.lastMonthlyResetInstant(now);
+    }
+
+    private static Instant nextMonthly(ZonedDateTime now) {
+        return WeeklyStatusResetService.nextMonthlyResetInstant(now);
+    }
+
+    @Test
+    @DisplayName("每月：1 号 08:00 之前 → 取上个月 1 号 08:00")
+    void monthlyBeforeEight() {
+        assertEquals(at(10, 1, 8, 0).toInstant(), lastMonthly(at(11, 1, 7, 59)));
+    }
+
+    @Test
+    @DisplayName("每月：1 号 08:00 整 → 就是这一刻")
+    void monthlyExactlyEight() {
+        assertEquals(at(11, 1, 8, 0).toInstant(), lastMonthly(at(11, 1, 8, 0)));
+    }
+
+    @Test
+    @DisplayName("每月：月中任意时刻 → 都是本月 1 号 08:00")
+    void monthlyMidMonth() {
+        assertEquals(at(11, 1, 8, 0).toInstant(), lastMonthly(at(11, 21, 13, 12)));
+        assertEquals(at(11, 1, 8, 0).toInstant(), lastMonthly(at(11, 30, 23, 59)));
+        // 跨年：1 月里取的是当年 1 月 1 号
+        assertEquals(at(1, 1, 8, 0).withYear(2027).toInstant(),
+                lastMonthly(at(1, 15, 0, 0).withYear(2027)));
+    }
+
+    @Test
+    @DisplayName("每月：下次重置是下个月 1 号 08:00（跨年）")
+    void monthlyNextAcrossYear() {
+        assertEquals(at(1, 1, 8, 0).withYear(2027).toInstant(),
+                nextMonthly(at(12, 31, 23, 0).withYear(2026)));
+        assertEquals(at(12, 1, 8, 0).toInstant(), nextMonthly(at(11, 21, 13, 12)));
+    }
+
+    @Test
+    @DisplayName("每月：1 号 07:59 → 当天 08:00；1 号 08:00 整 → 下个月")
+    void monthlyNextEdges() {
+        assertEquals(at(11, 1, 8, 0).toInstant(), nextMonthly(at(11, 1, 7, 59)));
+        assertEquals(at(12, 1, 8, 0).toInstant(), nextMonthly(at(11, 1, 8, 0)));
+    }
+
+    @Test
+    @DisplayName("重置范围：每月 BOSS 不参与每周重置，反之亦然")
+    void resetScopeSeparatesMonthlyAndWeekly() {
+        // 每周重置（scope = FALSE）
+        assertTrue(WeeklyStatusResetService.inResetScope(false, Boolean.FALSE));
+        assertFalse(WeeklyStatusResetService.inResetScope(true, Boolean.FALSE));
+        // 每月重置（scope = TRUE）
+        assertTrue(WeeklyStatusResetService.inResetScope(true, Boolean.TRUE));
+        assertFalse(WeeklyStatusResetService.inResetScope(false, Boolean.TRUE));
+        // 手动重置（scope = null）两种都清
+        assertTrue(WeeklyStatusResetService.inResetScope(true, null));
+        assertTrue(WeeklyStatusResetService.inResetScope(false, null));
     }
 }

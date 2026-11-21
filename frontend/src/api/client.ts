@@ -291,6 +291,8 @@ export const api = {
     sortOrder?: number;
     enabled?: boolean;
     note?: string;
+    /** 按月刷新：true = 每月 1 号 08:00 才重置（不跟随每周四） */
+    monthly?: boolean;
   }) => request<BossView>('/bosses', { method: 'POST', body: JSON.stringify(body) }),
   updateBoss: (
     id: number,
@@ -303,13 +305,21 @@ export const api = {
       sortOrder?: number;
       enabled?: boolean;
       note?: string;
+      /** 按月刷新：true = 每月 1 号 08:00 才重置（不跟随每周四） */
+      monthly?: boolean;
     },
   ) => request<BossView>(`/bosses/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteBoss: (id: number) => request<void>(`/bosses/${id}`, { method: 'DELETE' }),
 
   runs: () => request<RunView[]>('/runs'),
   /** 完成状态的重置时间（上次 / 下次） */
-  statusReset: () => request<{ lastResetAt?: string | null; nextResetAt?: string }>('/status-reset'),
+  statusReset: () =>
+    request<{
+      lastResetAt?: string | null;
+      nextResetAt?: string;
+      lastMonthlyResetAt?: string | null;
+      nextMonthlyResetAt?: string;
+    }>('/status-reset'),
   createRun: (body: {
     bossId: number;
     tier?: string;

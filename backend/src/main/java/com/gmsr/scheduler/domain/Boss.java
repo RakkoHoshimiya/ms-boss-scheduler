@@ -56,6 +56,23 @@ public class Boss extends AuditedEntity {
     @Column(length = 255)
     private String note;
 
+    /**
+     * 按月刷新：true 表示这个 BOSS 只有在**每月 1 号 08:00** 才重置完成状态，
+     * 不跟随每周四的重置（例如「老黑能量车」，游戏里一个月才刷一次）。
+     *
+     * 为 false 时行为与以前完全一致 —— 每周四 08:00 和普通 BOSS 一起清。
+     */
+    @Column(nullable = false)
+    private boolean monthly = false;
+
+    public boolean isMonthly() {
+        return monthly;
+    }
+
+    public void setMonthly(boolean monthly) {
+        this.monthly = monthly;
+    }
+
     public BossGroup getGroup() {
         return group;
     }

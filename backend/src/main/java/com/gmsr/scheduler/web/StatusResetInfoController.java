@@ -27,6 +27,10 @@ public class StatusResetInfoController {
         Map<String, Object> result = new HashMap<>();
         result.put("lastResetAt", resetService.lastResetAt() == null ? null : resetService.lastResetAt().toString());
         result.put("nextResetAt", resetService.nextResetAt().toString());
+        // 按月刷新的 BOSS（如老黑能量车）走另一条节奏：每月 1 号 08:00
+        result.put("lastMonthlyResetAt",
+                resetService.lastMonthlyResetAt() == null ? null : resetService.lastMonthlyResetAt().toString());
+        result.put("nextMonthlyResetAt", resetService.nextMonthlyResetAt().toString());
         return result;
     }
 }

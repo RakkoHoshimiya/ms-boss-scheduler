@@ -90,6 +90,11 @@ export interface BossView {
   comboName?: string | null;
   /** 融合车固定难度 */
   comboTier?: string | null;
+  /**
+   * 按月刷新：true 表示只有**每月 1 号 08:00** 才把它的车次重置为「未完成」，
+   * 不跟随每周四的重置（例如「老黑能量车」，游戏里一个月才刷一次）。
+   */
+  monthly?: boolean;
 }
 
 export interface MemberView {

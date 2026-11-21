@@ -215,6 +215,14 @@ public class DataMigrator implements ApplicationRunner {
     private static final String REMOVE_PLAYERS_MARKER = "remove-players-once";
     private static final String QQ_NAMES_MARKER = "qq-names-once";
     private static final String RESTORE_BOSSES_MARKER = "restore-bosses-once";
+    /**
+     * 按月刷新的 BOSS：游戏中一个月才刷一次，不能跟着每周四一起清。
+     * 属于「数据更正」而不是「一次性修复」，但同样只在库里还没有任何 BOSS 被标记时跑一次，
+     * 之后以管理员在表单里的勾选为准（marker 只是避免反复覆盖人工配置）。
+     */
+    private static final String BOSS_MONTHLY_MARKER = "boss-monthly-reset-v1";
+    /** 按月刷新（每月 1 号 08:00）的 BOSS 名单，与 games 内实际刷新周期一致。 */
+    private static final List<String> MONTHLY_BOSSES = List.of("老黑能量车");
     private static final String MERGE_FROM = "群友U";
     private static final String MERGE_TO = "群友W";
 
@@ -293,6 +301,7 @@ public class DataMigrator implements ApplicationRunner {
         runOnce(BOSS_COMBO_MARKER, this::migrateBossCombos);
         runOnce(BOSS_ICON_KEY_EVILSTAR_MARKER, this::renameEvilStarIconKey);
         runOnce(RESTORE_BOSSES_MARKER, this::restoreBosses);
+        runOnce(BOSS_MONTHLY_MARKER, this::markMonthlyBosses);
         runOnce(ACCOUNT_MARKER, this::rebuildAccounts);
         // 职业名归一化是**幂等且安全**的（只把别名换成标准名，不改语义），保留每次执行
         normalizeCharacterJobs();
@@ -705,6 +714,24 @@ public class DataMigrator implements ApplicationRunner {
                 bossRepository.save(boss);
                 log.info("BOSS 图标补齐：{} -> {}", name, icon);
             }
+        }
+    }
+
+    /**
+     * 给「按月刷新」的 BOSS 打上标记（老黑能量车 / 黑魔法师）。
+     *
+     * 为什么不硬编码在重置逻辑里：刷新周期是**数据**而不是规则，
+     * 管理员以后在 BOSS 表单里勾/取消勾选即可改变，代码不需要再改。
+     * 这里只是把历史数据补齐 —— 之前没有这个字段，线上老黑一直被每周四清掉。
+     */
+    private void markMonthlyBosses() {
+        for (Boss boss : bossRepository.findAllByOrderByGroupSortOrderAscSortOrderAscIdAsc()) {
+            if (!MONTHLY_BOSSES.contains(boss.getName()) || boss.isMonthly()) {
+                continue;
+            }
+            boss.setMonthly(true);
+            bossRepository.save(boss);
+            log.info("BOSS 刷新周期标记：{} -> 按月刷新（每月 1 号 08:00，不跟随每周四）", boss.getName());
         }
     }
 

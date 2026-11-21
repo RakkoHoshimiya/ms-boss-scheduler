@@ -964,6 +964,7 @@ export default function BossSchedulePage() {
           <span className="sub">
             每车 {boss.capacity} 人 · {tierText(selectedTier)} · 共 {runCards.length} 趟
             {currentCombo.length > 0 ? ' · 要打全打' : ''}
+            {boss.monthly ? ' · 按月刷新（每月 1 号 08:00 重置完成状态）' : ''}
           </span>
           <div className="spacer" />
           <button className="btn" onClick={() => loadRuns(viewBossIds)}>
@@ -1441,6 +1442,11 @@ export default function BossSchedulePage() {
                   <div className="boss-card-name" title={boss.name}>
                     {boss.name}
                   </div>
+                  {boss.monthly ? (
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      按月刷新
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
@@ -1511,6 +1517,11 @@ function BossFormModal({
   const [capacity, setCapacity] = useState(String(initial?.capacity ?? 6));
   const [iconKey, setIconKey] = useState(initial?.iconKey ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
+  /**
+   * 按月刷新：游戏里一个月才刷一次的 BOSS（如老黑能量车）。
+   * 勾上之后它**不跟随每周四的重置**，只在每月 1 号 08:00 归零。
+   */
+  const [monthly, setMonthly] = useState(initial?.monthly ?? false);
   const [busy, setBusy] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
@@ -1526,6 +1537,7 @@ function BossFormModal({
         enabled: true,
         iconKey: iconKey.trim(),
         note,
+        monthly,
       };
       if (initial) {
         await api.updateBoss(initial.id, body);
@@ -1640,6 +1652,21 @@ function BossFormModal({
               </label>
             ))}
           </div>
+        </div>
+
+        <div className="field" style={{ marginTop: 16 }}>
+          <span>完成状态的重置周期</span>
+          <label className="tier-check" style={{ display: 'inline-flex' }}>
+            <input
+              type="checkbox"
+              checked={monthly}
+              onChange={(e) => setMonthly(e.target.checked)}
+            />
+            按月刷新
+            <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+              这个 BOSS 游戏里一个月才刷一次（如老黑能量车）：勾上后只有每月 1 号 08:00 才把车次改回「未完成」，不跟随每周四的重置
+            </span>
+          </label>
         </div>
 
         <label className="field" style={{ marginBottom: 0 }}>

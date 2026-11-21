@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 维护类接口（仅管理员）。
  *
- * 目前只有「手动把全部车次改回未完成」——定时任务是每周四 08:00 自动跑，
+ * 目前只有「手动把全部车次改回未完成」——定时任务是每周四 08:00（按月刷新的 BOSS 是每月 1 号 08:00）自动跑，
  * 这个入口用于：定时没跑成功时手动补救，或者测试。
  */
 @RestController

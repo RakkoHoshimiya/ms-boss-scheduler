@@ -34,6 +34,15 @@ export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
 
 export const CHANGE_LOG: ChangeGroup[] = [
   {
+    date: '11/21',
+    title: '按月刷新的 BOSS 不再跟随每周重置',
+    entries: [
+      { type: 'fix', text: '老黑能量车（黑魔法师）一个月才刷一次，之前却被每周四 08:00 和普通 BOSS 一起清掉。现在它只在每月 1 号 08:00 重置，每周重置会跳过它' },
+      { type: 'feature', text: 'BOSS 编辑里新增「按月刷新」勾选：勾上后该 BOSS 的车次只在每月 1 号 08:00 归零，适合一个月才刷一次的 BOSS' },
+      { type: 'improve', text: '车次一览表顶部补充了按月刷新的说明与下次重置时间，卡片上也会标出「按月刷新」' },
+    ],
+  },
+  {
     date: '11/15',
     title: '攻略草稿恢复、七天回收站与排班自动同步',
     entries: [
