@@ -1,0 +1,29 @@
+# 统一行尾为 LF。
+#
+# 背景：这个仓库曾在 Windows 上开发（core.autocrlf=true），检出后工作树里
+# 所有文本文件都是 CRLF。仓库里的 blob 一直是 LF，所以 git 视角「没有改动」，
+# 但把工作树搬到 Linux 上时 —— deploy/*.sh 用 CRLF 直接被 bash 拒绝执行
+# （bash: syntax error near unexpected token `elif'），deploy/gmsr.conf、
+# *.service 交给 nginx / systemd 也有同样的风险。
+#
+# 这里显式钉死：文本一律 LF 存、LF 取，避免下次换机器又踩一遍。
+* text=auto eol=lf
+
+# 明确按二进制处理，别让 git 去做行尾转换
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.jar binary
+*.gz binary
+*.dump binary
+
+# shell / 配置脚本必须是 LF，否则在 Linux 上不能执行
+*.sh text eol=lf
+*.service text eol=lf
+*.conf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.sql text eol=lf

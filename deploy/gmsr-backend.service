@@ -14,7 +14,11 @@ ExecStart=/usr/bin/java -XX:+UseSerialGC -XX:MaxMetaspaceSize=160m -Xms64m -Xmx3
 SuccessExitStatus=143
 Restart=always
 RestartSec=5
-# 日志交给 journald 统一管理（自带轮转，避免日志无限增长）
+# 控制台输出仍交给 journald（现场 journalctl 一把抓），但应用日志不再依赖它：
+# 2026-11-21 发现京东云主机安全组件向内核 audit 注册了全量 execve 规则，
+# 每天往 journal 灌约 100 万条审计事件，把应用日志整片挤掉了（journalctl -u gmsr-backend 只剩 1 条）。
+# 现在应用自己按天/按大小滚动写 /opt/gmsr/logs（见 backend/src/main/resources/logback-spring.xml），
+# 上限 14 天 / 500MB；journald 侧另有 /etc/systemd/journald.conf.d/99-gmsr-limits.conf 限制 500MB。
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=gmsr-backend

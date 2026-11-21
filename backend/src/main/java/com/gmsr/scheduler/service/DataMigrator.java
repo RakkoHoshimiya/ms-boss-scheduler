@@ -12,6 +12,7 @@ import com.gmsr.scheduler.domain.JobCatalog;
 import com.gmsr.scheduler.domain.GameCharacter;
 import com.gmsr.scheduler.domain.Player;
 import com.gmsr.scheduler.domain.RunMember;
+import com.gmsr.scheduler.logging.LogMasker;
 import com.gmsr.scheduler.repository.AppSettingRepository;
 import com.gmsr.scheduler.repository.AppUserRepository;
 import com.gmsr.scheduler.repository.BossGroupRepository;
@@ -369,7 +370,7 @@ public class DataMigrator implements ApplicationRunner {
             user.setPlayer(player);
             userRepository.save(user);
             bound++;
-            log.info("账号 {} 未绑定群友，已自动补绑到「{}」", user.getUsername(), player.getNickname());
+            log.info("账号 {} 未绑定群友，已自动补绑到「{}」", LogMasker.maskAccount(user.getUsername()), player.getNickname());
         }
         if (bound > 0) {
             log.info("补绑账号完成：{} 个", bound);
@@ -462,7 +463,7 @@ public class DataMigrator implements ApplicationRunner {
             }
             user.setPlayer(player);
             userRepository.save(user);
-            log.info("账号 {} 已补群友记录「{}」", user.getUsername(), player.getNickname());
+            log.info("账号 {} 已补群友记录「{}」", LogMasker.maskAccount(user.getUsername()), player.getNickname());
         }
         playerRepository.flush();
         userRepository.flush();
@@ -913,7 +914,7 @@ public class DataMigrator implements ApplicationRunner {
                             .findFirst())
                     .orElse(null);
             if (player == null) {
-                log.warn("对照表里的「{}」（QQ {}）在数据库里找不到对应群友", name, qq);
+                log.warn("对照表里的「{}」（QQ {}）在数据库里找不到对应群友", name, LogMasker.maskAccount(qq));
                 continue;
             }
             if (!player.getNickname().equals(name)) {
@@ -950,13 +951,14 @@ public class DataMigrator implements ApplicationRunner {
                         .findFirst()
                         .orElse(null);
                 if (user != null) {
-                    log.info("登录账号变更：{} -> {}（{}）", user.getUsername(), player.getQq(), player.getNickname());
+                    log.info("登录账号变更：{} -> {}（{}）", LogMasker.maskAccount(user.getUsername()),
+                            LogMasker.maskAccount(player.getQq()), player.getNickname());
                 }
             }
             if (user == null) {
                 user = new AppUser();
                 user.setRole(AppUser.Role.VIEWER);
-                log.info("为群友「{}」（QQ {}）新建账号", player.getNickname(), player.getQq());
+                log.info("为群友「{}」（QQ {}）新建账号", player.getNickname(), LogMasker.maskAccount(player.getQq()));
                 accounts.add(user);
             }
             // 同一群友名下多余的账号（含旧的昵称账号）删掉
@@ -997,7 +999,7 @@ public class DataMigrator implements ApplicationRunner {
         }
 
         for (AppUser user : toDelete) {
-            log.info("删除多余/无效账号：{}（{}）", user.getUsername(), user.getDisplayName());
+            log.info("删除多余/无效账号：{}（{}）", LogMasker.maskAccount(user.getUsername()), user.getDisplayName());
         }
         userRepository.deleteAll(toDelete);
         userRepository.flush();
@@ -1008,8 +1010,8 @@ public class DataMigrator implements ApplicationRunner {
         }
         userRepository.flush();
         if (!result.isEmpty()) {
-            log.info("已按 QQ 号整理 {} 个群友账号，初始密码 {}，首次登录需修改密码：{}",
-                    result.size(), defaultPassword, String.join("、", result));
+            log.info("已按 QQ 号整理 {} 个群友账号，初始密码{}，首次登录需修改密码：{}",
+                    result.size(), LogMasker.describeSecret(defaultPassword), String.join("、", result));
         }
     }
 

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置：控制台 + 滚动文件。
+
+  为什么要有文件日志：2026-11-21 接手时发现线上 `journalctl -u gmsr-backend` 里
+  只剩 1 条记录 —— 京东云主机安全组件向内核 audit 注册了全量 execve 规则，
+  每天向 journal 灌约 100 万条审计事件，而 journald 原先没有任何容量上限，
+  把应用日志整片挤掉了。结果就是线上真出故障时看不到任何应用日志。
+
+  因此这里做两件事：
+  1. 应用日志自己落盘，不再单纯依赖 journald；
+  2. 按天 + 按大小滚动，并且限制总占用（14 天 / 500MB），不会反过来吃满磁盘。
+
+  输出目录取 GMSR_LOG_DIR，未设置时用相对路径 logs（systemd 的
+  WorkingDirectory=/opt/gmsr，所以生产上就是 /opt/gmsr/logs）。
+  用相对路径而不是写死 /opt/gmsr/logs，是为了让 CI 和本地测试
+  在 backend/ 下跑时不至于因为目录不可写而报错。
+-->
+<configuration>
+
+    <springProperty scope="context" name="GMSR_LOG_DIR" source="gmsr.logging.dir" defaultValue="logs"/>
+
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS,Asia/Shanghai} %-5level [%thread] %logger{36} - %msg%n"/>
+
+    <!-- 控制台：journald 仍然照常收取，便于 journalctl 现场排查 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 全量应用日志，按天 + 按大小滚动 -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${GMSR_LOG_DIR}/gmsr.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${GMSR_LOG_DIR}/gmsr.log.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 只收 WARN 及以上，排查故障时先看这个文件，量小、信号密度高 -->
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${GMSR_LOG_DIR}/gmsr-error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>WARN</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${GMSR_LOG_DIR}/gmsr-error.log.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+      异步包装：磁盘抖动时（这台机器只有 40G 云盘，且备份任务在凌晨跑）
+      不能让日志写入卡住请求线程。队列满了丢弃而不是阻塞 —— 宁可丢日志，不能拖慢业务。
+    -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <appender name="ASYNC_FILE_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE_ERROR"/>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_FILE_ERROR"/>
+    </root>
+
+</configuration>

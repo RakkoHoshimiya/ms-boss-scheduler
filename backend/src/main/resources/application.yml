@@ -92,6 +92,10 @@ sa-token:
 gmsr:
   notes:
     directory: ${GMSR_NOTES_DIRECTORY:./data/note-attachments}
+  logging:
+    # 应用日志落盘目录（见 logback-spring.xml）。systemd 的 WorkingDirectory=/opt/gmsr，
+    # 所以生产上落到 /opt/gmsr/logs；相对路径的写法让 CI 和本地测试也能跑。
+    dir: ${GMSR_LOG_DIR:logs}
   player:
     # 群友账号初始密码（也是管理员重置后的密码），首次登录会要求修改
     default-password: ${GMSR_PLAYER_PASSWORD:<DEFAULT_PLAYER_PASSWORD>}

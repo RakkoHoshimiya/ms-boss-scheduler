@@ -402,7 +402,28 @@ npm run smoke            # 冒烟测试
 | 封面图裂开 | 图标文件缺失，跑 `npm run check-icons` |
 | 语音无法连接 | 需放行 UDP 50000-50200、TCP 7881、UDP/TCP 3478、TCP 5349 |
 
-日志：`journalctl -u gmsr-backend -f`
+日志（两处都有，优先看文件）：
+
+| 位置 | 内容 | 保留 |
+| --- | --- | --- |
+| `/opt/gmsr/logs/gmsr.log` | 全量 INFO 及以上 | 14 天 / 最多 500 MB，按天+50 MB 滚动 |
+| `/opt/gmsr/logs/gmsr-error.log` | 仅 WARN 及以上，排查故障先看这个 | 30 天 / 最多 200 MB |
+| `journalctl -u gmsr-backend -f` | 控制台输出，与上面 gmsr.log 内容一致 | 受 journald 限额约束 |
+
+```bash
+tail -f /opt/gmsr/logs/gmsr.log          # 实时
+tail -n 200 /opt/gmsr/logs/gmsr-error.log # 只看告警与错误
+```
+
+> 日志目录由 `GMSR_LOG_DIR` 控制，默认相对路径 `logs`；systemd 的 `WorkingDirectory=/opt/gmsr`，
+> 所以生产上就是 `/opt/gmsr/logs`。应用日志不能只依赖 journald：这台机器上的云厂商主机安全组件
+> 会向内核 audit 注册全量 execve 规则，每天往 journal 灌约 100 万条审计事件，
+> 把应用日志整片挤掉过（`journalctl -u gmsr-backend` 一度只剩 1 条）。
+> journald 侧另有 `/etc/systemd/journald.conf.d/99-gmsr-limits.conf` 限制 500 MB。
+>
+> 日志里的账号按「前 2 位 + `***` + 后 2 位」脱敏，口令一律不输出（只可能出现「已设置（长度 N）」）。
+> 脱敏是显式点位做的（见 `backend/src/main/java/com/gmsr/scheduler/logging/LogMasker.java`），
+> 不做全局正则替换 —— 那种写法会把日期和耗时一起打掉。
 
 ---
 

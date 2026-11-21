@@ -6,14 +6,20 @@ set -euo pipefail
 MODE="${1:-all}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$HERE/.." && pwd)"
-# 部署私钥：优先用 ~/.ssh/gmsr_deploy，其次用项目上级目录 .deploy/id_ed25519
-if [ -f "$HOME/.ssh/gmsr_deploy" ]; then
-  SSH_KEY="$HOME/.ssh/gmsr_deploy"
-else
-  SSH_KEY="$PROJECT_DIR/../.deploy/id_ed25519"
+# 部署私钥：SSH_KEY 环境变量优先，其次项目内 .deploy/，
+# 再次项目上级目录的 .deploy/（旧目录布局），最后 ~/.ssh/gmsr_deploy
+if [[ -z "${SSH_KEY:-}" ]]; then
+  if [ -f "$PROJECT_DIR/.deploy/id_ed25519" ]; then
+    SSH_KEY="$PROJECT_DIR/.deploy/id_ed25519"
+  elif [ -f "$PROJECT_DIR/../.deploy/id_ed25519" ]; then
+    SSH_KEY="$PROJECT_DIR/../.deploy/id_ed25519"
+  else
+    SSH_KEY="$HOME/.ssh/gmsr_deploy"
+  fi
 fi
 if [[ -z "${KNOWN_HOSTS:-}" ]]; then
-  if [[ -f "$PROJECT_DIR/../.deploy/known_hosts" ]]; then KNOWN_HOSTS="$PROJECT_DIR/../.deploy/known_hosts"
+  if [[ -f "$PROJECT_DIR/.deploy/known_hosts" ]]; then KNOWN_HOSTS="$PROJECT_DIR/.deploy/known_hosts"
+  elif [[ -f "$PROJECT_DIR/../.deploy/known_hosts" ]]; then KNOWN_HOSTS="$PROJECT_DIR/../.deploy/known_hosts"
   else KNOWN_HOSTS="$HOME/.ssh/known_hosts"; fi
 fi
 [[ -f "$KNOWN_HOSTS" ]] || { echo '缺少已核验的 SSH known_hosts 文件；请先核对服务器指纹，并用 KNOWN_HOSTS=/path/to/known_hosts 指定文件。' >&2; exit 1; }
@@ -78,7 +84,7 @@ BACKEND
 deploy_frontend() {
   echo "==> 本地构建前端"
   cd "$PROJECT_DIR/frontend"
-  export npm_config_cache="$PROJECT_DIR/../.tools/npm-cache"
+  export npm_config_cache="${npm_config_cache:-$PROJECT_DIR/.cache/npm}"
   npm ci --no-audit --no-fund
   npm run build
   echo "==> 上传静态文件到 /opt/1panel/www/gmsr"

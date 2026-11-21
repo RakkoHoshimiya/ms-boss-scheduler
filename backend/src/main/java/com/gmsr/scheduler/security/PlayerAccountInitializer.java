@@ -2,6 +2,7 @@ package com.gmsr.scheduler.security;
 
 import com.gmsr.scheduler.domain.AppUser;
 import com.gmsr.scheduler.domain.Player;
+import com.gmsr.scheduler.logging.LogMasker;
 import com.gmsr.scheduler.repository.AppUserRepository;
 import com.gmsr.scheduler.repository.PlayerRepository;
 import java.util.ArrayList;
@@ -62,7 +63,7 @@ public class PlayerAccountInitializer implements ApplicationRunner {
             if (existing != null) {
                 existing.setPlayer(player);
                 userRepository.save(existing);
-                log.info("账号 {} 已存在，已补上绑定群友 {}", existing.getUsername(), player.getNickname());
+                log.info("账号 {} 已存在，已补上绑定群友 {}", LogMasker.maskAccount(existing.getUsername()), player.getNickname());
                 continue;
             }
             AppUser user = new AppUser();
@@ -77,7 +78,8 @@ public class PlayerAccountInitializer implements ApplicationRunner {
             created.add(player.getNickname());
         }
         if (!created.isEmpty()) {
-            log.info("已为 {} 位群友创建账号（初始密码 {}）：{}", created.size(), defaultPassword, String.join("、", created));
+            log.info("已为 {} 位群友创建账号（初始密码{}）：{}",
+                    created.size(), LogMasker.describeSecret(defaultPassword), String.join("、", created));
         }
     }
 }
