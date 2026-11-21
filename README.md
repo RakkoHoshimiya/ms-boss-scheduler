@@ -3,16 +3,32 @@
 冒险岛（GMSR）固定队排班与席位编排工具。核心是「一趟车上谁能上、上什么角色、还差几个人」，
 以及融合车（多个 BOSS 必须凑同一批人打）的一致性约束。
 
-- **后端**：Spring Boot 3.5.16 / Java 25 / PostgreSQL 18 / Flyway
+- **后端**：Spring Boot 3.5.16 / Java 25 / PostgreSQL / Flyway
 - **前端**：React 18 + TypeScript + Vite（构建产物是纯静态文件）
 - **鉴权**：SA-Token + Redis（服务端会话，可随时吊销）
 - **语音**（可选）：LiveKit
+
+## 使用指南
+
+| 你想做什么 | 从哪里开始 |
+| --- | --- |
+| 查看排班 | 打开「车次一览表」。未登录也能看车次、BOSS 和重置时间。切回页面时会自动更新，编辑或拖拽期间会等操作结束再同步。 |
+| 登记角色、找自己的车次 | 登录后在「我的信息」登记角色，在「我的车次」查看个人行程。首次登录或管理员重置密码后需先改密。 |
+| 管理 BOSS 和席位 | 管理员可在「系统设置」开通排班权限。有排班权限的用户可创建车次、编排阵容、跨趟调车和换位。复制车次沿用难度、时间和备注，席位从空阵容开始。 |
+| 查找或编写攻略 | 登录后打开「活动攻略与TIPS」，可搜索、置顶、编写图文攻略。编辑自动保存为私有草稿，删除的攻略和草稿可在 7 天内从回收站恢复。 |
+| 加入语音 | 部署者启用 LiveKit 后，登录并打开「Boss语音频道」，选择频道并允许浏览器使用麦克风。 |
+
+### 活动攻略与 TIPS
+
+- 在一个编辑区写文字、粘贴图片或在光标位置插图，也可把文件放在文章底部。每篇最多 12 个附件，单个文件最多 20 MB。支持 PNG、JPEG、GIF、WebP、PDF、TXT 和 ZIP。图片可先看预览，再按需加载原图，两者均需登录。
+- 窗口关闭或页面刷新后，可从「我的草稿」继续编辑。编辑中的改动和已上传附件会随草稿保存。多人编辑同一篇攻略时，保存会检查版本，避免覆盖其他人的更新。
+- 站点的登录用户可以发布、编辑、置顶、删除和恢复共享攻略。草稿和草稿中新上传的附件仅本人可访问，发布后其他登录用户可查看。
 
 ---
 
 ## 一、快速部署（单机）
 
-以下步骤在一台干净的 Linux（Debian/Ubuntu 系）上从零跑通。假设用 `root` 操作。
+以下示例面向使用 systemd 的 Debian/Ubuntu，命令以 `root` 执行。Docker 运行数据库和 Redis，systemd 运行后端，Nginx 或 OpenResty 提供同源 HTTPS。
 
 ### 0. 需要先准备的东西
 
@@ -20,35 +36,41 @@
 | --- | --- | --- |
 | JDK | **25** | `pom.xml` 里 `java.version=25`，低版本编译不过 |
 | Maven | 3.9+ | 仅构建时需要，运行只用 jar |
-| PostgreSQL | **16 / 17 / 18** | 用 Docker 起最省事 |
+| PostgreSQL | **16** | 示例和 CI 使用 16，已有实例填写实际连接参数 |
 | Redis | 6+ | SA-Token 会话存储，**必须有** |
-| Node.js | 20+ | 仅构建前端时需要 |
+| Node.js | 22+ | 构建前端和运行验证脚本，CI 使用 22 |
+| Nginx 或 OpenResty | — | 提前准备站点域名及浏览器信任的 TLS 证书 |
 
-> Flyway 官方支持到 PostgreSQL 17。跑 18 会有 `Flyway upgrade recommended` 警告，**不影响运行**。
+若新装时选用 PostgreSQL 18 官方镜像，数据卷应挂载到 `/var/lib/postgresql`。现有数据库的大版本升级需按 PostgreSQL 的迁移流程执行。[PostgreSQL 官方镜像说明](https://hub.docker.com/_/postgres#pgdata)
 
 ### 1. 起数据库与 Redis
 
 ```bash
 docker run -d --name gmsr-pg \
+  --restart unless-stopped \
   -e POSTGRES_PASSWORD='换成你的强密码' \
   -p 127.0.0.1:5432:5432 \
   -v /opt/gmsr/pgdata:/var/lib/postgresql/data \
-  postgres:18-alpine
+  postgres:16-alpine
 
 docker run -d --name gmsr-redis \
+  --restart unless-stopped \
   -p 127.0.0.1:6379:6379 \
-  redis:7-alpine redis-server --requirepass '换成你的Redis密码'
+  -v /opt/gmsr/redisdata:/data \
+  redis:7-alpine redis-server --appendonly yes --requirepass '换成你的Redis密码'
+
+docker exec gmsr-pg pg_isready -h 127.0.0.1 -U postgres
 ```
 
 ### 2. 建库建账号
 
 ```bash
-docker exec -i gmsr-pg psql -U postgres -d postgres <<'SQL'
+docker exec -i gmsr-pg psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 CREATE ROLE gmsr_app LOGIN PASSWORD '换成你的库密码';
 CREATE DATABASE gmsr OWNER gmsr_app ENCODING 'UTF8' TEMPLATE template0;
 SQL
 
-docker exec -i gmsr-pg psql -U postgres -d gmsr <<'SQL'
+docker exec -i gmsr-pg psql -v ON_ERROR_STOP=1 -U postgres -d gmsr <<'SQL'
 CREATE SCHEMA IF NOT EXISTS gmsr AUTHORIZATION gmsr_app;
 ALTER ROLE gmsr_app SET search_path = gmsr, public;
 SQL
@@ -61,21 +83,24 @@ SQL
 
 ```bash
 git clone https://github.com/RakkoHoshimiya/ms-boss-scheduler.git
-cd ms-boss-scheduler/backend
-mvn -B package -DskipTests
-# 产物：target/gmsr-scheduler.jar
+cd ms-boss-scheduler
+java -version
+mvn -B -f backend/pom.xml package -DskipTests
+# 产物位于 backend/target/gmsr-scheduler.jar
 ```
 
 ### 4. 写配置
 
 ```bash
 useradd --system --home /opt/gmsr --shell /usr/sbin/nologin gmsr
-mkdir -p /opt/gmsr/app /opt/gmsr/logs
-cp target/gmsr-scheduler.jar /opt/gmsr/app/
-chown -R gmsr:gmsr /opt/gmsr
+install -d -m 0755 /opt/gmsr/app
+install -d -o gmsr -g gmsr -m 0750 /opt/gmsr/logs /opt/gmsr/data
+install -d -o gmsr -g gmsr -m 0700 /opt/gmsr/data/note-attachments
+install -m 0644 backend/target/gmsr-scheduler.jar /opt/gmsr/app/
+install -o gmsr -g gmsr -m 0600 deploy/gmsr.env.example /opt/gmsr/gmsr.env
 ```
 
-创建 `/opt/gmsr/gmsr.env`（权限 `600`，属主 `gmsr`）：
+编辑 `/opt/gmsr/gmsr.env`，按以下示例填入实际连接参数和密码。管理员、群友初始密码分别设置，语音可保持关闭。
 
 ```ini
 GMSR_DB_URL=jdbc:postgresql://127.0.0.1:5432/gmsr?currentSchema=gmsr
@@ -90,6 +115,9 @@ GMSR_REDIS_DB=1
 GMSR_ADMIN_USER=admin
 GMSR_ADMIN_PASSWORD=你的管理员密码
 GMSR_PLAYER_PASSWORD=群友初始密码
+GMSR_NOTES_DIRECTORY=/opt/gmsr/data/note-attachments
+GMSR_BOSS_ICON_DIR=/var/www/gmsr/boss-icons
+GMSR_LOG_DIR=/opt/gmsr/logs
 
 # 可选：语音
 GMSR_VOICE_ENABLED=false
@@ -100,48 +128,24 @@ chmod 600 /opt/gmsr/gmsr.env
 chown gmsr:gmsr /opt/gmsr/gmsr.env
 ```
 
-### 5. 起后端服务
+### 5. 构建前端并启动后端
 
 ```bash
-cat >/etc/systemd/system/gmsr-backend.service <<'UNIT'
-[Unit]
-Description=GMSR Scheduler Backend
-After=network-online.target docker.service
-Wants=network-online.target
+(cd frontend && npm ci --no-audit --no-fund && npm run build)
+install -d -m 0755 /var/www/gmsr
+cp -r frontend/dist/. /var/www/gmsr/
 
-[Service]
-Type=simple
-User=gmsr
-Group=gmsr
-WorkingDirectory=/opt/gmsr
-EnvironmentFile=/opt/gmsr/gmsr.env
-ExecStart=/usr/bin/java -Xms64m -Xmx384m -Duser.timezone=Asia/Shanghai -Dfile.encoding=UTF-8 -jar /opt/gmsr/app/gmsr-scheduler.jar
-Restart=always
-RestartSec=5
-SuccessExitStatus=143
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
+install -m 0644 deploy/gmsr-backend.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now gmsr-backend
-curl -s http://127.0.0.1:18080/api/health
+curl -fsS http://127.0.0.1:18080/api/health
 ```
 
-后端**只监听 127.0.0.1:18080**，不对外暴露。
+服务单元默认从 `/usr/bin/java` 启动，请先确认该路径指向 JDK 25。后端监听 `127.0.0.1:18080`。首次启动会执行 Flyway 迁移，等健康接口返回 `"status":"UP"` 后再检查前端。
 
-### 6. 构建并部署前端
+### 6. 配置 HTTPS 站点
 
-```bash
-cd ../frontend
-npm ci --no-audit --no-fund
-npm run build          # 产物在 dist/
-```
-
-把 `dist/` 整个目录交给任意静态服务器即可。用 Nginx：
+将以下配置加入 Nginx，并替换域名和证书路径。前端和 `/api/` 使用同一个站点，附件上传需要允许至少 21 MB 的请求。
 
 ```nginx
 server {
@@ -153,6 +157,11 @@ server {
 
     root /var/www/gmsr;
     index index.html;
+    client_max_body_size 21m;
+
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
 
     # 前端是 SPA，未知路径一律回落到 index.html
     location / {
@@ -171,17 +180,20 @@ server {
 ```
 
 ```bash
-rm -rf /var/www/gmsr/* && cp -r dist/. /var/www/gmsr/
 nginx -t && nginx -s reload
+curl -fsS https://your.domain.com/api/health
 ```
 
-> 构建产物用的是**相对路径**（`vite.config.ts` 里 `base: './'`），
-> 所以放在根路径 `/` 或子目录 `/gmsr/` 下都能直接用，不需要改配置。
+使用 1Panel/OpenResty 时可参考 [站点模板](deploy/gmsr.conf) 和 [安全响应头](deploy/security-headers.inc)。将静态根目录、证书、监听端口和 include 路径改成你的配置。代理在容器内时，确认容器能访问后端和 LiveKit 上游，例如在 Linux 上使用 host 网络。若改用子目录部署，浏览器仍从同源的 `/api/` 请求后端。
 
 ### 7. 首次登录
 
 用 `GMSR_ADMIN_USER` / `GMSR_ADMIN_PASSWORD` 登录。
-**首次登录会强制改密**（服务端强制，不是前端弹窗），改完才能用其它功能。
+首次登录后先改密，再到「系统设置」创建或绑定群友账号并按需授予排班权限。打开「车次一览表」确认能读到数据。
+
+### 8. 启用语音（可选）
+
+部署 LiveKit，设置 `GMSR_VOICE_ENABLED=true`，填写 LiveKit 的 `GMSR_VOICE_API_KEY`、`GMSR_VOICE_API_SECRET` 和浏览器能访问的 `GMSR_VOICE_WS_URL`，然后重启后端。使用仓库的 [LiveKit 代理模板](deploy/livekit-rtc.inc) 时，WSS 地址填 `wss://your.domain.com/lk`（非默认 HTTPS 端口需写端口）。防火墙和云安全组按你的 LiveKit 配置放行 ICE 和 TURN 所需端口。使用 HTTPS 登录后，在「Boss语音频道」验证加入、麦克风和声音播放。[LiveKit 端口说明](https://docs.livekit.io/transport/self-hosting/ports-firewall/)
 
 ---
 
@@ -191,7 +203,7 @@ nginx -t && nginx -s reload
 
 - 空库：首次启动自动建全套结构
 - 已有数据的库：迁移会就地执行，无需手动干预
-- 新增结构变更：**只能加新的 `V7__xxx.sql`**，不要改动已发布的迁移文件
+- 新增结构变更使用下一个版本号，新文件名形如 `V12__xxx.sql`。保留已发布的迁移文件原样。
 
 > 已发布的迁移文件被改过会被 Flyway 拒绝启动（`checksum mismatch`）。
 > 线上库里 `flyway_schema_history` 记着每个文件的校验和，改一个字节就对不上。
@@ -214,7 +226,7 @@ nginx -t && nginx -s reload
 
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `GMSR_DB_URL` | 是 | `jdbc:postgresql://127.0.0.1:54233/gmsr` | JDBC 连接串 |
+| `GMSR_DB_URL` | 是 | — | JDBC 连接串。单机示例使用端口 5432 并指定 `currentSchema=gmsr` |
 | `GMSR_DB_USER` | 是 | `gmsr_app` | 数据库账号 |
 | `GMSR_DB_PASSWORD` | 是 | — | 数据库密码 |
 | `GMSR_DB_SCHEMA` | 否 | `gmsr` | schema 名 |
@@ -224,18 +236,20 @@ nginx -t && nginx -s reload
 | `GMSR_REDIS_DB` | 否 | `1` | 与其它业务隔离 |
 | `GMSR_ADMIN_USER` | 否 | `admin` | 初始管理员账号 |
 | `GMSR_ADMIN_PASSWORD` | 是 | — | 初始管理员密码 |
-| `GMSR_PLAYER_PASSWORD` | 否 | `gmsr123456` | 群友初始密码 |
+| `GMSR_PLAYER_PASSWORD` | 是 | — | 群友初始及重置密码 |
 | `GMSR_CORS` | 否 | — | 仅本地 vite 调试需要 |
 | `GMSR_LOGIN_MAX_ATTEMPTS` | 否 | `8` | 同账号失败锁定阈值 |
+| `GMSR_LOGIN_MAX_ATTEMPTS_PER_IP` | 否 | `30` | 同来源 IP 失败锁定阈值 |
 | `GMSR_LOGIN_LOCK_MINUTES` | 否 | `15` | 锁定时长 |
-| `GMSR_BOSS_ICON_DIR` | 否 | `/opt/1panel/www/gmsr/boss-icons` | 仅启动自检用，指向你的静态站点图标目录 |
+| `GMSR_BOSS_ICON_DIR` | 否 | — | 仅启动自检用，指向你的静态站点图标目录 |
+| `GMSR_NOTES_DIRECTORY` | 否 | `./data/note-attachments` | 攻略附件和图片的持久目录，必须在静态站点目录之外 |
+| `GMSR_LOG_DIR` | 否 | `logs` | 日志持久目录，由服务用户写入 |
 | `GMSR_VOICE_ENABLED` | 否 | `false` | 语音功能开关 |
-| `GMSR_VOICE_API_KEY` | 否 | — | LiveKit key |
-| `GMSR_VOICE_API_SECRET` | 否 | — | LiveKit secret |
-| `GMSR_VOICE_WS_URL` | 否 | — | 形如 `wss://域名/rtc` |
+| `GMSR_VOICE_API_KEY` | 启用语音时 | — | LiveKit key |
+| `GMSR_VOICE_API_SECRET` | 启用语音时 | — | LiveKit secret |
+| `GMSR_VOICE_WS_URL` | 启用语音时 | — | 客户端可访问的 WSS 地址，例如复用仓库代理模板时填 `wss://your.domain.com/lk` |
 
-> **生产环境务必覆盖** `GMSR_ADMIN_PASSWORD` 和 `GMSR_PLAYER_PASSWORD`。
-> 用默认值时启动日志会告警，但不会阻止启动。
+相对路径以服务工作目录为准。使用仓库的 systemd 单元时，附件默认写入 `/opt/gmsr/data/note-attachments`，日志默认写入 `/opt/gmsr/logs`。
 
 ---
 
@@ -246,7 +260,7 @@ nginx -t && nginx -s reload
 | 角色 | 说明 |
 | --- | --- |
 | `ADMIN` | 管理员：管理账号、重置密码，同时具备排班权限 |
-| `VIEWER` | 群友：能登录、看自己的车次、登记自己的角色 |
+| `VIEWER` | 群友：能登录、看自己的车次、登记自己的角色，可单独授予排班权限 |
 
 `app_user.can_schedule = true` 的账号拥有排班权（改 BOSS、排车位、删车次）。
 
@@ -255,7 +269,7 @@ nginx -t && nginx -s reload
 - ✅ 车次一览表（`GET /api/runs`、`/api/runs/{id}`）
 - ✅ BOSS 列表（`GET /api/bosses`、`/api/boss-groups`）
 - ✅ 重置时间信息（`GET /api/status-reset`）
-- ❌ 群友名单、角色列表、按人查行程、语音频道 —— **全部要求登录**
+- 群友名单、角色列表、个人行程、攻略与附件、语音频道都需要登录
 
 权限规则以**默认拒绝**收尾：没被显式列出的接口一律 403。新增接口必须显式归类。
 
@@ -284,7 +298,7 @@ nginx -t && nginx -s reload
 | POST | `/runs` | 新建车次 |
 | PUT | `/runs/{id}` | 修改车次 |
 | DELETE | `/runs/{id}` | 删除车次（融合车整组删） |
-| POST | `/runs/{id}/copy` | 复制一趟（含阵容，融合车整组复制） |
+| POST | `/runs/{id}/copy` | 复制一趟空车次（融合车整组复制） |
 | POST | `/runs/{id}/resequence` | 重排趟次（融合车整组重排） |
 | POST | `/runs/{id}/members` | 上人 |
 | PUT | `/runs/{id}/members/{memberId}` | 改席位 |
@@ -311,6 +325,16 @@ nginx -t && nginx -s reload
 | POST | `/admin/users/{id}/reset-password` | 重置密码 |
 | GET | `/health` | 健康检查 |
 
+### 攻略与草稿
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET / POST | `/notes` | 查看共享攻略列表或发布攻略 |
+| GET / PUT / DELETE | `/notes/{id}` | 查看、更新或移入回收站 |
+| GET | `/notes/drafts` | 查看自己的草稿 |
+| GET | `/notes/trash` | 查看共享攻略回收站 |
+| POST | `/notes/{id}/restore` | 从回收站恢复攻略 |
+
 ---
 
 ## 六、融合车（特殊机制）
@@ -328,63 +352,51 @@ GMSR 里有几个 BOSS 必须**同一批人连续打**，系统把这组 BOSS �
 
 ## 七、状态自动重置
 
-车次的「已完成」标记**每周四 08:00 自动归零**（排班本身不变，只是打没打完这层状态）。
+车次只重置「已完成」标记，原有排班和席位继续保留。以下时间均为 `Asia/Shanghai`。
 
-**按月刷新的 BOSS 不跟随每周重置**：游戏里一个月才刷一次的那种（如「老黑能量车」/ 黑魔法师），
-在 BOSS 表单里勾上「按月刷新」后，只在**每月 1 号 08:00** 归零，每周四的重置会跳过它。
+- 普通 BOSS 每周四 08:00 重置。
+- BOSS 表单勾选「按月刷新」后，每月 1 日 08:00 重置，例如「老黑能量车」。
 
-服务若在该时刻没运行，下次启动会补执行一次，不会漏。
+服务若在重置时刻停机，启动后会补跑。可在「车次一览表」或 `GET /api/status-reset` 查看两种周期的重置时间。
 
 ---
 
 ## 八、备份与恢复
 
-`deploy/backup.sh`、`deploy/restore.sh` 是作者线上环境在用的脚本，里面写死了
-1Panel 面板创建的 PostgreSQL 容器名与 `/opt/gmsr` 目录结构。**换环境使用前必须先改这两处**，
-否则脚本会找不到容器。
+升级或换机前，备份 PostgreSQL、`GMSR_NOTES_DIRECTORY` 和实际部署配置。暂停后端写入后生成同批次数据库和附件备份，恢复时用同一批次配对。配置备份包含密码或密钥，请限制访问权限。
 
-通用做法：
-
-```bash
-# 备份
-docker exec -i gmsr-pg pg_dump -U gmsr_app -d gmsr | gzip > gmsr-$(date +%F).sql.gz
-
-# 恢复（先停服务！）
-systemctl stop gmsr-backend
-gunzip -c gmsr-2026-11-09.sql.gz | docker exec -i gmsr-pg psql -U gmsr_app -d gmsr
-systemctl start gmsr-backend
-```
-
-详细流程见 [`deploy/RESTORE.md`](deploy/RESTORE.md)。
+仓库的 `deploy/backup.sh` 和 `deploy/restore.sh` 以 1Panel 目录布局为默认值。使用其他布局前，配置实际的 `PG_CONTAINER`、数据库参数和备份脚本中的站点配置路径。备份脚本生成同一时间戳的数据库和附件归档，保留期默认 14 天。建议先在独立库做一次恢复演练，并检查攻略中的图片和附件。[备份和恢复流程](deploy/RESTORE.md)
 
 ---
 
 ## 九、本地开发
 
 ```bash
-# 后端（需要本地 PG + Redis，或改 application.yml 指向容器）
+# 后端（先设置指向本地 PostgreSQL 和 Redis 的 GMSR_* 环境变量）
 cd backend && mvn spring-boot:run
 
-# 前端
-cd frontend && npm install && npm run dev
-# vite 默认 5173，通过 GMSR_CORS 允许跨域
+# 另开终端，从仓库根目录启动前端
+cd frontend && npm ci && npm run dev
+# Vite 默认监听 5173，并把 /api 转发到 127.0.0.1:18080
 ```
 
 测试：
 
 ```bash
 cd backend
-mvn test                      # 只跑纯单元测试
-GMSR_INTEGRATION_DB=1 mvn test   # 连同需要真实数据库的集成测试
+mvn test                                            # 默认测试
+GMSR_INTEGRATION_DB=1 GMSR_INTEGRATION_REDIS=1 mvn verify  # 启用 PostgreSQL 和 Redis 集成测试
 ```
 
 前端校验脚本：
 
 ```bash
 cd frontend
-npm run check-icons      # BOSS 图标文件是否齐全
-npm run check:integrity  # 数据一致性巡检
-npm run smoke            # 冒烟测试
+npm run build
+npm run verify:notes
+npm run verify:sync
+npm run verify:auth-session
+npm run verify:voice-lifecycle
 ```
 
 ---
@@ -393,14 +405,15 @@ npm run smoke            # 冒烟测试
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| 启动报 `checksum mismatch` | 改动过已发布的迁移文件。恢复原文件，或新增 `V7` |
+| 启动报 `checksum mismatch` | 找回已发布的原迁移文件。新的结构变更放到下一版迁移 |
 | 启动报 `relation "xxx" does not exist` | 数据库账号缺 `search_path = gmsr, public` |
 | 启动报 `ddl-auto: validate` 失败 | 实体与库结构不一致，检查迁移是否全部执行 |
 | 所有人突然变成未登录 | Redis 挂了。检查 `GMSR_REDIS_*` 与 Redis 进程 |
 | 前端 404 / 白屏 | Nginx 缺 `try_files ... /index.html`（SPA 回落） |
 | 登录后接口全 403 | 账号 `must_change_password` 为真，先改密码 |
 | 封面图裂开 | 图标文件缺失，跑 `npm run check-icons` |
-| 语音无法连接 | 需放行 UDP 50000-50200、TCP 7881、UDP/TCP 3478、TCP 5349 |
+| 附件上传返回 413 | 检查代理的请求体限制和单文件 20 MB 上限 |
+| 语音无法连接 | 检查 HTTPS、WSS、麦克风权限以及 LiveKit 配置对应的防火墙端口 |
 
 日志（两处都有，优先看文件）：
 
@@ -415,15 +428,7 @@ tail -f /opt/gmsr/logs/gmsr.log          # 实时
 tail -n 200 /opt/gmsr/logs/gmsr-error.log # 只看告警与错误
 ```
 
-> 日志目录由 `GMSR_LOG_DIR` 控制，默认相对路径 `logs`；systemd 的 `WorkingDirectory=/opt/gmsr`，
-> 所以生产上就是 `/opt/gmsr/logs`。应用日志不能只依赖 journald：这台机器上的云厂商主机安全组件
-> 会向内核 audit 注册全量 execve 规则，每天往 journal 灌约 100 万条审计事件，
-> 把应用日志整片挤掉过（`journalctl -u gmsr-backend` 一度只剩 1 条）。
-> journald 侧另有 `/etc/systemd/journald.conf.d/99-gmsr-limits.conf` 限制 500 MB。
->
-> 日志里的账号按「前 2 位 + `***` + 后 2 位」脱敏，口令一律不输出（只可能出现「已设置（长度 N）」）。
-> 脱敏是显式点位做的（见 `backend/src/main/java/com/gmsr/scheduler/logging/LogMasker.java`），
-> 不做全局正则替换 —— 那种写法会把日期和耗时一起打掉。
+应用写入滚动日志文件，系统日志也会收到控制台输出。账号初始化和数据迁移日志对指定账号字段应用了脱敏。对外分享日志前，检查其中的主机名、账号和连接参数。
 
 ---
 
@@ -450,7 +455,7 @@ frontend/
 deploy/
   gmsr.env.example  环境变量模板
   RESTORE.md        备份恢复流程
-  *.sh              线上在用的部署/备份脚本
+  *.sh              部署与备份脚本
 ```
 
 ---
@@ -458,16 +463,3 @@ deploy/
 ## 十二、许可
 
 内部使用。未附带开源许可证。
-
-
-### 活动攻略与TIPS：编辑及附件
-
-登录后可从「活动便签」进入。所有登录用户均可发布、编辑、删除及置顶；列表按置顶、最近更新时间排序，支持搜索及详情查看。正文使用单一连续编辑区，图片直接显示在文字中，支持光标插图、粘贴图片及直接删除图片；保留换行，不执行粘贴的 HTML。发布和编辑时均可上传文件，选择插入正文或作为底部附件；详情中仅尾附文件显示在底部，正文图片按编辑位置展示。
-
-附件先使用服务器本地存储，不依赖 NAS 在线。设置 `GMSR_NOTES_DIRECTORY` 为持久目录（生产建议 `/opt/gmsr/data/note-attachments`），并确保运行服务的 `gmsr` 用户可读写。默认是工作目录下的 `data/note-attachments`，不要放入静态网站目录。附件读取同样要求登录，不提供公开文件链接。
-
-存储键规则：`YYYY/MM/DD/attachment-{UUID}.{小写扩展名}`（旧附件的 `note-{便签ID}-{UUID}` 路径保持兼容），日期使用上海时区；原始文件名只作为下载名称保存在数据库。单附件 20 MB，每张便签最多 12 个附件。支持 PNG、JPG、GIF 图片预览及 WebP、PDF、TXT、ZIP 下载。代理上传限制需至少 21 MB（仓库的 OpenResty 配置已同步）。数据库结构由 V7–V9 迁移创建。便签更新包含版本检查，发现并发修改会返回 409，避免旧内容覆盖新内容；置顶使用独立接口。新文件先作为本人可读的待发布附件上传，保存时通过事务绑定便签；取消时清理新文件，超过 24 小时未发布的文件由定时任务回收。编辑中移除旧附件只在保存后生效。
-
-**备份与恢复必须同时包含数据库和附件目录**；新版 `backup.sh` 会调用同目录的 `backup-attachments.sh`，生成同一时间戳的附件包并保留 14 天。恢复步骤见 `deploy/RESTORE.md`。更换附件目录时应先复制原文件。NAS RustFS 暂未连接或配置；后续接入需确认服务器到 NAS 的访问地址和专用存储凭据。
-
-便签回归检查：先在 `frontend` 下执行 `npm run build`，再执行 `npm run verify:notes`，覆盖发布前上传、光标插图、尾附、失败保留及取消编辑。
